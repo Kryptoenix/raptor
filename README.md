@@ -88,6 +88,7 @@ cd raptor
 ### 2. Install Python Dependencies
 
 ```bash
+pipenv shell
 pip install -r requirements.txt
 ```
 
