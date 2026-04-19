@@ -18,8 +18,7 @@ from typing import Any, Dict, List, Optional
 import json
 
 # Add parent directories to path for core imports
-# packages/llm_analysis/llm/config.py -> repo root
-sys.path.insert(0, str(Path(__file__).parents[3]))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.logging import get_logger
 
@@ -618,7 +617,7 @@ class LLMConfig:
     max_cost_per_scan: float = 10.0  # USD
 
     def to_file(self, config_path: Path) -> None:
-        """Save configuration to JSON file with restrictive permissions."""
+        """Save configuration to JSON file."""
         from core.json import save_json
         primary = None
         if self.primary_model:
@@ -629,7 +628,7 @@ class LLMConfig:
         save_json(config_path, {
             "primary_model": primary,
             "fallback_enabled": self.enable_fallback,
-        }, mode=0o600)
+        })
 
     def get_model_for_task(self, task_type: str) -> ModelConfig:
         """Get the appropriate model for a specific task type."""

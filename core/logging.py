@@ -102,40 +102,44 @@ class RaptorLogger:
 
         self.debug(f"RAPTOR logging initialized - audit trail: {log_file}")
 
-    def debug(self, message: str, **kwargs: Any) -> None:
-        """Log debug message."""
-        # Extract reserved parameters that must not be in extra dict
-        exc_info = kwargs.pop('exc_info', False)
-        stack_info = kwargs.pop('stack_info', False)
-        self.logger.debug(message, extra=kwargs, exc_info=exc_info, stack_info=stack_info)
+    def _format_msg(self, message: str, args: tuple) -> str:
+        """Apply %-style formatting if positional args are given."""
+        if args:
+            try:
+                return message % args
+            except (TypeError, ValueError):
+                return f"{message} {args}"
+        return message
 
-    def info(self, message: str, **kwargs: Any) -> None:
-        """Log info message."""
-        # Extract reserved parameters that must not be in extra dict
+    def debug(self, message: str, *args: Any, **kwargs: Any) -> None:
+        """Log debug message. Supports %-style formatting: debug('x=%s', val)."""
         exc_info = kwargs.pop('exc_info', False)
         stack_info = kwargs.pop('stack_info', False)
-        self.logger.info(message, extra=kwargs, exc_info=exc_info, stack_info=stack_info)
+        self.logger.debug(self._format_msg(message, args), extra=kwargs, exc_info=exc_info, stack_info=stack_info)
 
-    def warning(self, message: str, **kwargs: Any) -> None:
-        """Log warning message."""
-        # Extract reserved parameters that must not be in extra dict
+    def info(self, message: str, *args: Any, **kwargs: Any) -> None:
+        """Log info message. Supports %-style formatting: info('x=%s', val)."""
         exc_info = kwargs.pop('exc_info', False)
         stack_info = kwargs.pop('stack_info', False)
-        self.logger.warning(message, extra=kwargs, exc_info=exc_info, stack_info=stack_info)
+        self.logger.info(self._format_msg(message, args), extra=kwargs, exc_info=exc_info, stack_info=stack_info)
 
-    def error(self, message: str, **kwargs: Any) -> None:
-        """Log error message."""
-        # Extract reserved parameters that must not be in extra dict
+    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
+        """Log warning message. Supports %-style formatting: warning('x=%s', val)."""
         exc_info = kwargs.pop('exc_info', False)
         stack_info = kwargs.pop('stack_info', False)
-        self.logger.error(message, extra=kwargs, exc_info=exc_info, stack_info=stack_info)
+        self.logger.warning(self._format_msg(message, args), extra=kwargs, exc_info=exc_info, stack_info=stack_info)
 
-    def critical(self, message: str, **kwargs: Any) -> None:
-        """Log critical message."""
-        # Extract reserved parameters that must not be in extra dict
+    def error(self, message: str, *args: Any, **kwargs: Any) -> None:
+        """Log error message. Supports %-style formatting: error('x=%s', val)."""
         exc_info = kwargs.pop('exc_info', False)
         stack_info = kwargs.pop('stack_info', False)
-        self.logger.critical(message, extra=kwargs, exc_info=exc_info, stack_info=stack_info)
+        self.logger.error(self._format_msg(message, args), extra=kwargs, exc_info=exc_info, stack_info=stack_info)
+
+    def critical(self, message: str, *args: Any, **kwargs: Any) -> None:
+        """Log critical message. Supports %-style formatting: critical('x=%s', val)."""
+        exc_info = kwargs.pop('exc_info', False)
+        stack_info = kwargs.pop('stack_info', False)
+        self.logger.critical(self._format_msg(message, args), extra=kwargs, exc_info=exc_info, stack_info=stack_info)
 
     def log_job_start(self, job_id: str, tool: str, arguments: Dict[str, Any]) -> None:
         """Log job start event."""

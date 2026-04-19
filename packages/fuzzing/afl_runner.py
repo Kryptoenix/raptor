@@ -270,13 +270,37 @@ class AFLRunner:
             logger.info(f"Starting AFL instance: {instance_name}")
             logger.debug(f"Command: {' '.join(cmd)}")
 
+            afl_env = self._get_afl_env()
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                env=afl_env,
             )
             processes.append((instance_name, proc))
+
+            # Give AFL a moment to start and check for immediate failure
+            # (config errors like core_pattern exit within 1-2 seconds)
+            time.sleep(2)
+            if proc.poll() is not None:
+                exit_code = proc.returncode
+                stdout, stderr = proc.communicate(timeout=5)
+                stderr_str = (stderr or "").strip()
+                logger.error("AFL instance %s failed immediately (exit %d)", instance_name, exit_code)
+                if stderr_str:
+                    logger.error("AFL stderr:\n%s", stderr_str)
+                    # Provide actionable advice for common errors
+                    if "core_pattern" in stderr_str:
+                        logger.error("FIX: sudo sh -c 'echo core > /proc/sys/kernel/core_pattern'")
+                    if "cpu_scaling" in stderr_str or "cpufreq" in stderr_str.lower():
+                        logger.error("FIX: echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor")
+                    if "not appear to be instrumented" in stderr_str:
+                        logger.error("FIX: Recompile the binary with afl-clang-fast / afl-gcc")
+                else:
+                    logger.error("No stderr captured — try running the command manually:")
+                    logger.error("  %s", " ".join(cmd))
+                raise RuntimeError(f"AFL++ failed to start: exit {exit_code}. {stderr_str[:300]}")
 
         # Monitor fuzzing
         start_time = time.time()
@@ -453,9 +477,6 @@ class AFLRunner:
         if use_qemu:
             cmd.append("-Q")
 
-        # Disable CPU affinity for now
-        cmd.append("-d")
-
         # Dictionary if provided
         if self.dict_path and self.dict_path.exists():
             cmd.extend(["-x", str(self.dict_path)])
@@ -470,6 +491,31 @@ class AFLRunner:
         # For stdin, AFL pipes input automatically
 
         return cmd
+
+    def _get_afl_env(self) -> dict:
+        """
+        Build environment variables for AFL++ that avoid common startup
+        failures on systems without root-level tuning.
+        """
+        env = os.environ.copy()
+
+        # Skip CPU frequency scaling check — not always configurable
+        # (containers, VMs, non-root users). AFL++ will warn but proceed.
+        env["AFL_SKIP_CPUFREQ"] = "1"
+
+        # Don't abort if /proc/sys/kernel/core_pattern isn't set to "core".
+        # On many systems (Docker, WSL, locked-down servers) users can't
+        # change core_pattern, but fuzzing still works — crashes are detected
+        # via exit codes and signals, not core dumps.
+        env["AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES"] = "1"
+
+        # Suppress the AFL++ UI banner — output goes to a log, not a terminal.
+        env["AFL_NO_UI"] = "1"
+
+        # Suppress calibration warnings for slow binaries
+        env["AFL_SKIP_BIN_CHECK"] = "1"
+
+        return env
 
     def get_stats(self) -> dict:
         """Get fuzzing statistics from AFL."""
@@ -516,8 +562,7 @@ class AFLRunner:
                 return {}
 
         try:
-            from core.config import RaptorConfig
-            env = RaptorConfig.get_safe_env()
+            env = os.environ.copy()
             if self.input_mode == "file" and test_input:
                 env['AFL_INPUT_FILE'] = str(test_input)
 
@@ -526,7 +571,6 @@ class AFLRunner:
                 capture_output=True,
                 text=True,
                 stdin=stdin_input,
-                close_fds=True,
                 cwd=str(self.output_dir),
                 env=env,
             )

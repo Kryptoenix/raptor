@@ -7,8 +7,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-# packages/llm_analysis/tests/test_prep_only.py -> repo root
-sys.path.insert(0, str(Path(__file__).parents[3]))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 class TestPrepOnlyFlag:
     """Test that --prep-only forces ClaudeCodeProvider regardless of LLM availability."""

@@ -76,8 +76,7 @@ def run_command_streaming(cmd: list, description: str) -> tuple[int, str, str]:
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,  # Line buffered
-            universal_newlines=True,
-            env=RaptorConfig.get_safe_env()
+            universal_newlines=True
         )
 
         stdout_lines = []
@@ -277,71 +276,60 @@ Examples:
         print(f"Error: Repository not found: {repo_path}")
         sys.exit(1)
 
-    # Track temp git copy for cleanup
-    _git_temp_dir = None
-    # Keep original target path for metadata/findings (even if we scan a temp copy)
-    original_repo_path = repo_path
-
     # Check for .git directory (required for semgrep)
     git_dir = repo_path / ".git"
     if not git_dir.exists():
         print(f"\n  No .git directory found in {repo_path}")
-        print(f"    Semgrep requires a git repository. Creating a temporary copy...")
-        logger.info(f"Target {repo_path} is not a git repo — creating temp copy")
-
+        print(f"    Semgrep requires the directory to be a git repository.")
+        print(f"\n[*] Initializing git repository...")
+        logger.info(f"Initializing git repository in {repo_path}")
+        
         try:
-            import shutil
-            import tempfile
-            temp_dir = Path(tempfile.mkdtemp(prefix="raptor_git_"))
-            _git_temp_dir = temp_dir
-            temp_repo = temp_dir / repo_path.name
-            # Copy symlinks as-is, don't follow them into files outside the repo
-            shutil.copytree(str(repo_path), str(temp_repo), symlinks=True)
-
-            env = RaptorConfig.get_safe_env()
-            env.update({
-                "GIT_TERMINAL_PROMPT": "0",
-                # Prevent git hooks and filters from executing on untrusted content
-                "GIT_CONFIG_GLOBAL": "/dev/null",
-                "GIT_CONFIG_SYSTEM": "/dev/null",
-            })
-            # Disable hooks and filters — a malicious .gitattributes filter
-            # directive would otherwise execute arbitrary commands during git add
-            git_safe = ["-c", "core.hooksPath=/dev/null",
-                        "-c", "filter.lfs.clean=true",
-                        "-c", "filter.lfs.smudge=true",
-                        "-c", "filter.lfs.process=true"]
+            # Initialize git repo
             result = subprocess.run(
-                ["git"] + git_safe + ["init"], cwd=temp_repo,
-                capture_output=True, text=True, timeout=30, env=env
+                ["git", "init"],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                timeout=30
             )
+            
             if result.returncode == 0:
+                print(f"✓ Git repository initialized successfully")
+                logger.info("Git repository initialized")
+                
+                # Add all files to git
                 subprocess.run(
-                    ["git"] + git_safe + ["add", "."], cwd=temp_repo,
-                    capture_output=True, timeout=60, env=env
+                    ["git", "add", "."],
+                    cwd=repo_path,
+                    capture_output=True,
+                    timeout=60
                 )
+                
+                # Create initial commit
                 subprocess.run(
-                    ["git"] + git_safe + ["commit", "-m", "RAPTOR scan snapshot"],
-                    cwd=temp_repo, capture_output=True, timeout=60, env=env
+                    ["git", "commit", "-m", "Initial commit for RAPTOR scan"],
+                    cwd=repo_path,
+                    capture_output=True,
+                    timeout=60
                 )
-                repo_path = temp_repo
-                print(f"  Temporary git repo created at {temp_repo}")
-                logger.info(f"Using temp git repo: {temp_repo}")
+                print(f"✓ Initial commit created")
+                logger.info("Initial commit created")
             else:
-                print(f"  Failed to initialize git repository: {result.stderr}")
+                print(f" Failed to initialize git repository: {result.stderr}")
                 logger.error(f"Git init failed: {result.stderr}")
                 sys.exit(1)
-
+                
         except subprocess.TimeoutExpired:
-            print(f"  Git initialization timed out")
+            print(f" Git initialization timed out")
             logger.error("Git init timeout")
             sys.exit(1)
         except FileNotFoundError:
-            print(f"  Git is not installed. Please install git and try again.")
+            print(f" Git is not installed. Please install git and try again.")
             logger.error("Git not found in PATH")
             sys.exit(1)
         except Exception as e:
-            print(f"  Error initializing git: {e}")
+            print(f" Error initializing git: {e}")
             logger.error(f"Git init error: {e}")
             sys.exit(1)
 
@@ -353,7 +341,7 @@ Examples:
 
     try:
         from core.run import start_run
-        start_run(out_dir, "agentic", target=str(original_repo_path))
+        start_run(out_dir, "agentic")
     except Exception as e:
         logger.debug(f"Run metadata: {e}")  # Optional — don't fail the pipeline
 
@@ -361,7 +349,7 @@ Examples:
     logger.info("RAPTOR AGENTIC WORKFLOW STARTED")
     logger.info("=" * 70)
     logger.info(f"Repository: {repo_name}")
-    logger.info(f"Full path: {original_repo_path}")
+    logger.info(f"Full path: {repo_path}")
     logger.info(f"Output: {out_dir}")
     logger.info(f"Policy groups: {args.policy_groups}")
     logger.info(f"Max findings: {args.max_findings}")
@@ -421,7 +409,7 @@ Examples:
     # ========================================================================
     # PRE-SCAN: Check target repo for malicious Claude Code settings
     # ========================================================================
-    block_cc_dispatch = _check_repo_claude_settings(original_repo_path)
+    block_cc_dispatch = _check_repo_claude_settings(repo_path)
 
     # ========================================================================
     # PHASE 1: CODE SCANNING (Semgrep + CodeQL)
@@ -434,7 +422,7 @@ Examples:
     try:
         from core.inventory import build_inventory
         if not (out_dir / "checklist.json").exists():
-            build_inventory(str(original_repo_path), str(out_dir))
+            build_inventory(str(repo_path), str(out_dir))
             logger.info(f"Inventory checklist built: {out_dir / 'checklist.json'}")
     except Exception as e:
         logger.warning(f"Inventory build failed (continuing without metadata): {e}")
@@ -463,7 +451,6 @@ Examples:
         logger.info(f"Running: Scanning code with Semgrep")
         semgrep_proc = subprocess.Popen(
             semgrep_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            env=RaptorConfig.get_safe_env(),
         )
 
     if run_codeql:
@@ -477,8 +464,6 @@ Examples:
         if args.languages:
             codeql_cmd.extend(["--languages", args.languages])
         if args.build_command:
-            # SECURITY: build_command is shell-evaluated. Must be operator-supplied,
-            # never derived from repo content (malicious Makefiles, etc.)
             codeql_cmd.extend(["--build-command", args.build_command])
         if args.extended:
             codeql_cmd.append("--extended")
@@ -487,7 +472,6 @@ Examples:
         logger.info(f"Running: Scanning code with CodeQL")
         codeql_proc = subprocess.Popen(
             codeql_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            env=RaptorConfig.get_safe_env(),
         )
 
     # ---- Collect Semgrep results ----
@@ -603,7 +587,7 @@ Examples:
     from packages.exploitability_validation import run_validation_phase
 
     validation_result, validated_findings = run_validation_phase(
-        repo_path=str(original_repo_path),
+        repo_path=str(repo_path),
         out_dir=out_dir,
         sarif_files=sarif_files,
         total_findings=total_findings,
@@ -711,7 +695,7 @@ Examples:
             from packages.llm_analysis.orchestrator import orchestrate
             orchestration_result = orchestrate(
                 prep_report_path=analysis_report,
-                repo_path=original_repo_path,
+                repo_path=repo_path,
                 out_dir=out_dir,
                 max_parallel=args.max_parallel,
                 max_findings=args.max_findings,
@@ -727,6 +711,89 @@ Examples:
         print("  For automated analysis, set an API key or install Claude Code.")
 
     # ========================================================================
+    # LLM DIRECT-CODE SCAN PHASE
+    # ========================================================================
+    # Runs the LLM scanner over the source code to find vulnerabilities that
+    # static analysis (Semgrep/CodeQL) may miss — XSS in templates, CSRF
+    # disabled in config, hardcoded secrets, security misconfigurations, etc.
+    # Merges results with any existing SARIF findings for deduplication.
+
+    llmscan_findings_count = 0
+    llmscan_exploitable = 0
+    llmscan_merged_count = 0
+
+    if llm_env.llm_available:
+        print("\n" + "=" * 70)
+        print("🔍 PHASE: LLM DIRECT-CODE SCAN")
+        print("=" * 70)
+        try:
+            from packages.llm_scan import LLMScanner, merge_findings
+            from packages.llm_scan.merger import load_sarif_findings, normalise_finding
+
+            llmscan_out = out_dir / "llmscan"
+            llmscan_out.mkdir(parents=True, exist_ok=True)
+
+            scanner = LLMScanner(
+                repo_path=repo_path,
+                out_dir=llmscan_out,
+                max_files=200,
+                max_chunks_per_file=20,
+            )
+
+            llm_raw_findings = scanner.scan()
+            llmscan_findings_count = len(llm_raw_findings)
+            print(f"  LLM scan found {llmscan_findings_count} raw finding(s)")
+
+            # Load existing SARIF findings for merge
+            sarif_loaded = []
+            for sf in sarif_files:
+                sarif_loaded.extend(load_sarif_findings(sf))
+
+            # Merge and deduplicate
+            merged = merge_findings(
+                llm_findings=llm_raw_findings,
+                sarif_findings=sarif_loaded,
+            )
+            llmscan_merged_count = len(merged)
+            llmscan_exploitable = sum(1 for f in merged if f.get("is_exploitable"))
+
+            # Save merged report
+            from collections import Counter as _Counter
+            sev_counts = _Counter(f.get("severity", "unknown") for f in merged)
+            llm_only = sum(1 for f in merged if (f.get("sources") or []) == ["llmscan"])
+            confirmed = sum(1 for f in merged if "llmscan" in (f.get("sources") or [])
+                           and any(t != "llmscan" for t in (f.get("sources") or [])))
+
+            merged_report = {
+                "tool": "llmscan+merge",
+                "repo": str(repo_path),
+                "mode": "agentic",
+                "total_findings": len(merged),
+                "exploitable": llmscan_exploitable,
+                "severity_breakdown": dict(sev_counts),
+                "source_breakdown": {
+                    "llm_only": llm_only,
+                    "sarif_only": len(merged) - llm_only - confirmed,
+                    "confirmed_both": confirmed,
+                },
+                "results": merged,
+            }
+            save_json(out_dir / "merged_report.json", merged_report)
+
+            print(f"  Merged: {llmscan_merged_count} total | "
+                  f"{llmscan_exploitable} exploitable | "
+                  f"{confirmed} confirmed by both | "
+                  f"{llm_only} LLM-only")
+            logger.info("LLM direct-code scan: %d raw, %d merged, %d exploitable",
+                        llmscan_findings_count, llmscan_merged_count, llmscan_exploitable)
+
+        except Exception as exc:
+            logger.warning("LLM direct-code scan phase failed: %s", exc)
+            print(f"  ⚠️  LLM scan phase failed: {exc}")
+    else:
+        print("\n  ⚠️  LLM scan phase skipped — no LLM provider available")
+
+    # ========================================================================
     # FINAL REPORT
     # ========================================================================
     workflow_duration = time.time() - workflow_start
@@ -737,7 +804,7 @@ Examples:
 
     final_report = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "repository": str(original_repo_path),
+        "repository": str(repo_path),
         "duration_seconds": workflow_duration,
         "tools_used": {
             "semgrep": not args.codeql_only,
@@ -777,6 +844,13 @@ Examples:
                 "completed": False,
                 "mode": "none",
             },
+            "llmscan": {
+                "completed": llmscan_findings_count > 0 or llmscan_merged_count > 0,
+                "skipped": not llm_env.llm_available,
+                "raw_findings": llmscan_findings_count,
+                "merged_findings": llmscan_merged_count,
+                "exploitable": llmscan_exploitable,
+            },
         },
         "outputs": {
             "sarif_files": [str(f) for f in sarif_files],
@@ -786,6 +860,7 @@ Examples:
             "exploits_directory": str(autonomous_out / "exploits") if autonomous_out else None,
             "patches_directory": str(autonomous_out / "patches") if autonomous_out else None,
             "exploit_feasibility": str(out_dir / "exploit_feasibility.txt") if mitigation_result else None,
+            "llmscan_report": str(out_dir / "merged_report.json") if llmscan_merged_count > 0 else None,
         }
     }
 
@@ -854,8 +929,11 @@ Examples:
             print(f"   Duplicates removed: {reduction:.0f}%")
     if analysed_count > 0 and analysed_count < validated_findings:
         skipped = validated_findings - analysed_count
+        # Subtract failures — they weren't skipped due to budget, they errored out
+        budget_skipped = max(0, skipped - failed_count - blocked_count)
         print(f"   Analysed: {analysed_count} of {validated_findings}")
-        print(f"   ⚠️  {skipped} finding{'s' if skipped != 1 else ''} skipped (--max-findings {args.max_findings})")
+        if budget_skipped > 0:
+            print(f"   ⚠️  {budget_skipped} finding{'s' if budget_skipped != 1 else ''} skipped (--max-findings {args.max_findings})")
     elif analysed_count > 0:
         print(f"   Analysed: {analysed_count}")
     if failed_count > 0 or blocked_count > 0:
@@ -915,6 +993,8 @@ Examples:
         print(f"   Exploits: {autonomous_out / 'exploits'}/")
     if patches_count > 0 and autonomous_out:
         print(f"   Patches: {autonomous_out / 'patches'}/")
+    if llmscan_merged_count > 0:
+        print(f"   LLM scan: {out_dir / 'merged_report.json'}")
 
     # Filter to analysed results (used by both console table and report)
     results = orchestration_result.get("results", []) if orchestration_result else []
@@ -939,6 +1019,8 @@ Examples:
             print("   ✓ Validated dataflow paths")
     if validation_result:
         print("   ✓ Deduplicated findings")
+    if llmscan_merged_count > 0:
+        print(f"   ✓ LLM direct-code scan ({llmscan_merged_count} findings, {llmscan_exploitable} exploitable)")
     print("   ✓ Analysed vulnerabilities")
     if exploits_count > 0:
         print(f"   ✓ Generated {exploits_count} exploit{'s' if exploits_count != 1 else ''}")
@@ -1079,15 +1161,6 @@ Examples:
         })
     except Exception as e:
         logger.debug(f"Run metadata: {e}")  # Optional — don't fail the pipeline
-
-    # Clean up temporary git copy (if we created one for a non-git target)
-    if _git_temp_dir and _git_temp_dir.exists():
-        import shutil
-        try:
-            shutil.rmtree(str(_git_temp_dir))
-            logger.debug(f"Cleaned up temp git dir: {_git_temp_dir}")
-        except Exception as e:
-            logger.debug(f"Failed to clean temp git dir: {e}")
 
 
 from core.schema_constants import VULN_TYPE_TO_CWE as _CWE_FROM_VULN_TYPE

@@ -13,8 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 # Add parent directory to path for imports
-# packages/codeql/dataflow_validator.py -> repo root
-sys.path.insert(0, str(Path(__file__).parents[2]))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from core.logging import get_logger
 

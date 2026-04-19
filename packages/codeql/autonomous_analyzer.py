@@ -18,8 +18,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 # Add parent directory to path for imports
-# packages/codeql/autonomous_analyzer.py -> repo root
-sys.path.insert(0, str(Path(__file__).parents[2]))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from core.json import save_json
 
@@ -594,10 +593,12 @@ Provide ONLY the complete, working exploit code. Include a header comment explai
             }
         save_json(analysis_file, analysis_data)
 
-        # Save exploit
+        # Save exploit to dedicated exploits/ subdirectory
         if exploit_code:
             exploit_ext = ".java" if "java" in finding.file_path.lower() else ".py"
-            exploit_file = out_dir / f"{finding.rule_id}_{finding.start_line}_exploit{exploit_ext}"
+            exploits_dir = out_dir / "exploits"
+            exploits_dir.mkdir(parents=True, exist_ok=True)
+            exploit_file = exploits_dir / f"{finding.rule_id}_{finding.start_line}_exploit{exploit_ext}"
             with open(exploit_file, 'w') as f:
                 f.write(exploit_code)
             self.logger.info(f"✓ Exploit saved: {exploit_file}")

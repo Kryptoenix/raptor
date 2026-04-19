@@ -1,0 +1,1 @@
+{"timestamp": "2026-04-16 10:48:50,314", "level": "DEBUG", "logger": "raptor", "module": "logging", "function": "debug", "line": 118, "message": "RAPTOR logging initialized - audit trail: /home/claude/raptor_fix2/out/logs/raptor_1776336530.jsonl"}

@@ -9,21 +9,21 @@ Dangerous operations (apply patches, delete, git push): ASK FIRST.
 
 **On first message:**
 VERY IMPORTANT: follow these steps in order.
-1. Read `.startup-output` using the Read tool, then output its contents verbatim as a fenced code block (``` with no language tag). Do NOT paraphrase or reformat. (The SessionStart hook generates this file automatically before your first message.)
-2. On a single line, output "Quick commands:" then list the /agentic, /scan, /fuzz, /web commands (don't explain what they do) and note /commands for the full list.
+1. Run `python3 raptor_startup.py >/dev/null 2>&1` (generates `.startup-output`)
+2. Read `.startup-output` using the Read tool, then output its contents verbatim as a fenced code block (``` with no language tag). Do NOT paraphrase or reformat.
+3. **UNLOAD:** Remove `.startup-output` contents from context (do not retain in conversation history)
+4. On a single line, output "Quick commands:" then list the /agentic, /scan, /fuzz, /web commands (don't explain what they do) and note /commands for the full list.
 
 ---
 
 ## COMMANDS
 
-/project - Project management: create, list, status, coverage, findings, diff, merge, report, clean, export
+/project - Project management: create, list, status, diff, merge, report, clean, export
 /scan /fuzz /web /agentic /codeql /analyze - Security testing
 /exploit /patch - Generate PoCs and fixes (beta)
 /validate - Exploitability validation pipeline (see below)
 /understand - Code understanding: map attack surface, trace flows, hunt variants (see below)
 /diagram - Generate Mermaid visual maps from /understand or /validate output (see below)
-
-**Coverage:** When asked about coverage, run `libexec/raptor-coverage-summary` (no args = active project). Use `--detailed` for per-file table, `--gaps` for unreviewed functions. See `.claude/skills/coverage.md` for mark/unmark and the full API.
 
 **Note:** `/agentic` runs scan → dedup → prep → analysis (with validation methodology). Use `--sequential` to bypass parallel orchestration.
 /crash-analysis - Autonomous crash root-cause analysis (see below)
@@ -40,12 +40,9 @@ Projects are opt-in named workspaces that corral analysis runs into a shared dir
 /project create myapp --target /path/to/code -d "Description"
 /project use myapp
 /scan                          # output goes to project dir
-/project status                # shows all runs
-/project findings              # shows merged findings across runs
-/project coverage              # shows tool coverage summary
+/project status                # shows all runs and findings
 /project report                # merged view across all runs
 /project clean --keep 3        # delete old runs
-/project none                  # clear active project
 ```
 
 See `/project help` for full command list.
@@ -56,7 +53,7 @@ See `/project help` for full command list.
 
 When a command like `/scan`, `/agentic`, `/validate`, `/codeql`, or `/fuzz` is run **without a path argument**, resolve the default target in this order:
 
-1. **Active project target:** the run lifecycle script reads the `.active` symlink to find the project target automatically
+1. **Active project target:** if `$RAPTOR_PROJECT_TARGET` is set, use it
 2. **Caller's directory:** if `$RAPTOR_CALLER_DIR` is set (launcher saves the user's cwd before switching to the RAPTOR repo dir), use it
 3. **Ask the user** for the target path
 
@@ -70,31 +67,23 @@ When running any analysis command (`/scan`, `/validate`, `/understand`, `/codeql
 
 **Before starting work:**
 ```bash
-libexec/raptor-run-lifecycle start <command> --target <resolved_target> [--out <dir>]
+OUTPUT_DIR=$(python3 -m core.run start <command>)
 ```
-Always pass `--target` with the resolved target path (see DEFAULT TARGET DIRECTORY for resolution order). Optionally pass `--out <dir>` to use a specific output directory. The last line of output is `OUTPUT_DIR=<path>` — use that path for all subsequent output files.
+This creates the output directory, writes `.raptor-run.json` with `status: running`, and prints the path. Use `$OUTPUT_DIR` for all output files.
 
 **After successful completion:**
 ```bash
-libexec/raptor-run-lifecycle complete "$OUTPUT_DIR"
+python3 -m core.run complete "$OUTPUT_DIR"
 ```
 
 **On failure:**
 ```bash
-libexec/raptor-run-lifecycle fail "$OUTPUT_DIR" "error description"
+python3 -m core.run fail "$OUTPUT_DIR" "error description"
 ```
 
-The `start` command automatically resolves the output directory using the active project (via `.active` symlink) or the default `out/` directory. Do not construct output paths manually.
+The `start` command automatically resolves the output directory using the active project (if any) or the default `out/` directory. Do not construct output paths manually.
 
-**If `start` fails (non-zero exit):** STOP. Report the error to the user. Do not proceed with the command.
-
-**Note:** `/validate` uses `libexec/raptor-validation-helper 0` instead of `raptor-run-lifecycle` — it bundles lifecycle management with inventory building.
-
-Commands run via `python3 raptor.py` (scan, agentic, codeql, fuzz, web) manage lifecycle internally — do not call the stubs separately for those.
-
-### Coverage tracking
-
-The coverage tracking plugin (`plugins/coverage/`) tracks which source files the LLM reads during analysis via a PostToolUse hook. Loaded automatically by the launcher. Logs file paths to a manifest in the active run directory, converted to `coverage-record.json` when the run completes. Zero overhead when no run is active.
+For commands that run via `python3 raptor.py` (agentic, scan, codeql), the Python script handles lifecycle internally — do not call the stubs.
 
 ---
 
@@ -212,9 +201,9 @@ The `/understand` command provides deep, adversarial code comprehension for secu
 - `hunt.md` — Structural, semantic, and root-cause variant analysis
 - `teach.md` — Framework/pattern explanation with security conclusion
 
-**Output:** Resolved by `libexec/raptor-run-lifecycle start understand` (project dir or `out/understand_<timestamp>/`)
+**Output:** `.out/code-understanding-<timestamp>/`
 
-**Pipeline integration:** `/validate` Stage 0 automatically imports `/understand` output via the bridge (`core/understand_bridge.py`). No `--out` alignment needed — the bridge searches: (1) co-located files, (2) project siblings, (3) global `out/` by target path + SHA-256 freshness. When found, it pre-populates `attack-surface.json`, imports flow traces as attack paths, and marks entry points/sinks as high-priority in the checklist.
+**Pipeline integration:** Planned — output schemas are aligned with validation pipeline formats for future integration.
 
 ---
 
@@ -234,7 +223,15 @@ very much a WIP but it could be of use for those wanting to see relationships an
 
 **Output:** `diagrams.md` written into the target directory (or `--stdout` to print)
 
-**Implementation:** `libexec/raptor-render-diagrams <out-dir> [--target <name>]`
+**Implementation:** `generate_diagram.py` (CLI) and `packages/diagram/` (library)
+
+```python
+# Programmatic use
+from packages.diagram import render_and_write
+from pathlib import Path
+
+out_file = render_and_write(Path(".out/code-understanding-20240101/"), target="myapp")
+```
 
 **When to run:** Diagrams are auto-generated at the end of `/validate` and `/understand --map`/`--trace`. Use `/diagram <dir>` to re-render after manual edits to JSON outputs.
 
@@ -307,4 +304,3 @@ See `tiers/exploit-guidance.md` for detailed constraint tables and technique alt
 Python orchestrates everything. Claude shows results concisely.
 Never circumvent Python execution flow.
 - never disclose remote OLLAMA server location in code, comments, logs etc
-- **Python path safety:** Never add anything to `sys.path` except `os.environ["RAPTOR_DIR"]`. Use the hard lookup (KeyError if unset) — no fallbacks, no `'.'`, no `os.getcwd()`, no hardcoded paths. The `libexec/` scripts handle their own path setup via `Path(__file__).resolve().parents[1]` and do not need `RAPTOR_DIR`.

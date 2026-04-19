@@ -16,8 +16,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 # Add parent directory to path for imports
-# packages/codeql/query_runner.py -> repo root
-sys.path.insert(0, str(Path(__file__).parents[2]))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from core.config import RaptorConfig
 from core.logging import get_logger
@@ -80,7 +79,6 @@ class QueryRunner:
         "ruby": "codeql/ruby-queries:codeql-suites/ruby-security-and-quality.qls",
         "swift": "codeql/swift-queries:codeql-suites/swift-security-and-quality.qls",
         "kotlin": "codeql/java-queries:codeql-suites/java-security-and-quality.qls",  # Kotlin uses Java queries
-        "rust": "codeql/rust-queries:codeql-suites/rust-security-and-quality.qls",
     }
 
     # Alternative: security-extended suites (more comprehensive)
@@ -93,7 +91,6 @@ class QueryRunner:
         "cpp": "codeql/cpp-queries:codeql-suites/cpp-security-extended.qls",
         "csharp": "codeql/csharp-queries:codeql-suites/csharp-security-extended.qls",
         "ruby": "codeql/ruby-queries:codeql-suites/ruby-security-extended.qls",
-        "rust": "codeql/rust-queries:codeql-suites/rust-security-extended.qls",
     }
 
     def __init__(self, codeql_cli: Optional[str] = None):
@@ -190,7 +187,6 @@ class QueryRunner:
                     "codeql/go-queries": "go",
                     "codeql/ruby-queries": "ruby",
                     "codeql/swift-queries": "swift",
-                    "codeql/rust-queries": "rust",
                 }
 
                 lang_dir = lang_map.get(pack_name)

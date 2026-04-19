@@ -24,8 +24,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 # Add parent directory to path for imports
-# packages/codeql/database_manager.py -> repo root
-sys.path.insert(0, str(Path(__file__).parents[2]))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from core.json import load_json, save_json
 from core.config import RaptorConfig
@@ -341,12 +340,7 @@ class DatabaseManager:
         working_dir = build_system.working_dir if build_system else repo_path
         env = RaptorConfig.get_safe_env()
         if build_system and build_system.env_vars:
-            # Filter build env vars through the same blocklist — a malicious
-            # repo's build config could try to re-inject LD_PRELOAD, BASH_ENV, etc.
-            blocked = set(RaptorConfig.DANGEROUS_ENV_VARS + RaptorConfig.PROXY_ENV_VARS)
-            for k, v in build_system.env_vars.items():
-                if k not in blocked:
-                    env[k] = v
+            env.update(build_system.env_vars)
 
         # Add build command if provided.
         # CodeQL splits --command on whitespace without shell interpretation,

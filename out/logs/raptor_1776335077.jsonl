@@ -1,0 +1,3 @@
+{"timestamp": "2026-04-16 10:24:37,652", "level": "DEBUG", "logger": "raptor", "module": "logging", "function": "debug", "line": 118, "message": "RAPTOR logging initialized - audit trail: /home/claude/raptor_fix2/out/logs/raptor_1776335077.jsonl"}
+{"timestamp": "2026-04-16 10:24:37,815", "level": "DEBUG", "logger": "raptor", "module": "logging", "function": "debug", "line": 118, "message": "RAPTOR logging initialized - audit trail: /home/claude/raptor_fix2/out/logs/raptor_1776335077.jsonl"}
+{"timestamp": "2026-04-16 10:24:37,998", "level": "DEBUG", "logger": "raptor", "module": "logging", "function": "debug", "line": 118, "message": "RAPTOR logging initialized - audit trail: /home/claude/raptor_fix2/out/logs/raptor_1776335077.jsonl"}

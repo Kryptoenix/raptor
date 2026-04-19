@@ -1,0 +1,22 @@
+{"timestamp": "2026-04-16 10:25:09,537", "level": "DEBUG", "logger": "raptor", "module": "logging", "function": "debug", "line": 118, "message": "RAPTOR logging initialized - audit trail: /home/claude/raptor_fix2/out/logs/raptor_1776335109.jsonl"}
+{"timestamp": "2026-04-16 10:25:09,585", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "Read README: README.md (79 chars)"}
+{"timestamp": "2026-04-16 10:25:09,586", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "============================================================"}
+{"timestamp": "2026-04-16 10:25:09,586", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "RAPTOR DISCOVERY PHASE"}
+{"timestamp": "2026-04-16 10:25:09,586", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "============================================================"}
+{"timestamp": "2026-04-16 10:25:09,586", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "Strategy: webapp"}
+{"timestamp": "2026-04-16 10:25:09,586", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "Tools: none"}
+{"timestamp": "2026-04-16 10:25:09,587", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "\n\u2500\u2500 Discovery Phase Complete \u2500\u2500"}
+{"timestamp": "2026-04-16 10:25:09,587", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "Total raw findings: 0"}
+{"timestamp": "2026-04-16 10:25:10,228", "level": "DEBUG", "logger": "raptor", "module": "logging", "function": "debug", "line": 118, "message": "LLM availability: external_llm=False, claude_code=False, llm_available=False"}
+{"timestamp": "2026-04-16 10:25:10,229", "level": "WARNING", "logger": "raptor", "module": "logging", "function": "warning", "line": 130, "message": "No external LLM available (no API keys, no config file, no Ollama). LLMClient constructed but calls will likely fail. For production use, configure at least one LLM provider."}
+{"timestamp": "2026-04-16 10:25:10,229", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "LLM Client initialized"}
+{"timestamp": "2026-04-16 10:25:10,229", "level": "WARNING", "logger": "raptor", "module": "logging", "function": "warning", "line": 130, "message": "LLM Client initialized with no primary model \u2014 all calls will fail"}
+{"timestamp": "2026-04-16 10:25:10,229", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "Fallback models: 0"}
+{"timestamp": "2026-04-16 10:25:10,229", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "============================================================"}
+{"timestamp": "2026-04-16 10:25:10,229", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "RAPTOR VALIDATION PHASE"}
+{"timestamp": "2026-04-16 10:25:10,229", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "============================================================"}
+{"timestamp": "2026-04-16 10:25:10,229", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "Input findings: 0"}
+{"timestamp": "2026-04-16 10:25:10,252", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "After deduplication: 0 findings"}
+{"timestamp": "2026-04-16 10:25:10,253", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "\n\u2500\u2500 Validation Phase Complete \u2500\u2500"}
+{"timestamp": "2026-04-16 10:25:10,254", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "Validated: 0 findings"}
+{"timestamp": "2026-04-16 10:25:10,254", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "Exploitable: 0"}

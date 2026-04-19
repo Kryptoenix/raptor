@@ -14,13 +14,13 @@ def generate_project_report(project) -> Dict[str, Any]:
     report_dir = project.output_path / "_report"
     report_dir.mkdir(parents=True, exist_ok=True)
 
-    run_dirs = project.get_run_dirs(sweep=True)
+    run_dirs = project.get_run_dirs()
     if not run_dirs:
         return {"findings": 0, "runs": 0}
 
     # Merge findings
     merged = merge_findings(run_dirs)
-    save_json(report_dir / "findings.json", {"findings": merged})
+    save_json(report_dir / "findings.json", merged)
 
     return {
         "findings": len(merged),

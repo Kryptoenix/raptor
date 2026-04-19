@@ -1,0 +1,26 @@
+{"timestamp": "2026-04-16 11:31:05,258", "level": "DEBUG", "logger": "raptor", "module": "logging", "function": "debug", "line": 118, "message": "RAPTOR logging initialized - audit trail: /home/claude/raptor_fix2/out/logs/raptor_1776339065.jsonl"}
+{"timestamp": "2026-04-16 11:31:05,261", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "Detected architecture: x86_64"}
+{"timestamp": "2026-04-16 11:31:05,268", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "Using QEMU emulator: /usr/bin/qemu-x86_64-static"}
+{"timestamp": "2026-04-16 11:31:05,462", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "QEMU probe 'help': 1 issue(s)"}
+{"timestamp": "2026-04-16 11:31:05,671", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "QEMU probe 'short-help': 1 issue(s)"}
+{"timestamp": "2026-04-16 11:31:05,936", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "QEMU probe 'no-args': 1 issue(s)"}
+{"timestamp": "2026-04-16 11:31:05,938", "level": "WARNING", "logger": "raptor", "module": "logging", "function": "warning", "line": 130, "message": "gdb not found \u2014 skipping binary analysis"}
+{"timestamp": "2026-04-16 11:31:06,538", "level": "DEBUG", "logger": "raptor", "module": "logging", "function": "debug", "line": 118, "message": "LLM availability: external_llm=False, claude_code=False, llm_available=False"}
+{"timestamp": "2026-04-16 11:31:06,538", "level": "WARNING", "logger": "raptor", "module": "logging", "function": "warning", "line": 130, "message": "No external LLM available (no API keys, no config file, no Ollama). LLMClient constructed but calls will likely fail. For production use, configure at least one LLM provider."}
+{"timestamp": "2026-04-16 11:31:06,538", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "LLM Client initialized"}
+{"timestamp": "2026-04-16 11:31:06,538", "level": "WARNING", "logger": "raptor", "module": "logging", "function": "warning", "line": 130, "message": "LLM Client initialized with no primary model \u2014 all calls will fail"}
+{"timestamp": "2026-04-16 11:31:06,539", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "Fallback models: 0"}
+{"timestamp": "2026-04-16 11:31:06,539", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "============================================================"}
+{"timestamp": "2026-04-16 11:31:06,539", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "RAPTOR VALIDATION PHASE"}
+{"timestamp": "2026-04-16 11:31:06,539", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "============================================================"}
+{"timestamp": "2026-04-16 11:31:06,539", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "Input findings: 3"}
+{"timestamp": "2026-04-16 11:31:06,549", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "After deduplication: 3 findings"}
+{"timestamp": "2026-04-16 11:31:06,549", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "[1/3] Validating: qemu-segfault-help in /tmp/crash_bin:0"}
+{"timestamp": "2026-04-16 11:31:06,549", "level": "DEBUG", "logger": "raptor", "module": "logging", "function": "debug", "line": 118, "message": "LLM validation failed for qemu-segfault-help: 'NoneType' object has no attribute 'max_context'"}
+{"timestamp": "2026-04-16 11:31:06,550", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "[2/3] Validating: qemu-segfault-short-help in /tmp/crash_bin:0"}
+{"timestamp": "2026-04-16 11:31:06,550", "level": "DEBUG", "logger": "raptor", "module": "logging", "function": "debug", "line": 118, "message": "LLM validation failed for qemu-segfault-short-help: 'NoneType' object has no attribute 'max_context'"}
+{"timestamp": "2026-04-16 11:31:06,550", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "[3/3] Validating: qemu-segfault-no-args in /tmp/crash_bin:0"}
+{"timestamp": "2026-04-16 11:31:06,550", "level": "DEBUG", "logger": "raptor", "module": "logging", "function": "debug", "line": 118, "message": "LLM validation failed for qemu-segfault-no-args: 'NoneType' object has no attribute 'max_context'"}
+{"timestamp": "2026-04-16 11:31:06,551", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "\n\u2500\u2500 Validation Phase Complete \u2500\u2500"}
+{"timestamp": "2026-04-16 11:31:06,551", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "Validated: 3 findings"}
+{"timestamp": "2026-04-16 11:31:06,551", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "Exploitable: 3"}

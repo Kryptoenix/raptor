@@ -1,19 +1,17 @@
 """Merge findings and SARIF across multiple run directories.
 
 Combines findings.json, SARIF files, and artefacts from multiple runs
-into a single output directory. Deduplicates findings by (file, function, line),
-latest wins.
+into a single output directory. Deduplicates findings by ID (latest wins).
 """
 
 import re
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from core.json import save_json
+from core.json import load_json, save_json
 from core.logging import get_logger
-from core.project.findings_utils import count_vulns as _count_vulns
-from core.project.findings_utils import dedup_key as _dedup_key
+from core.project.findings_utils import get_finding_id as _get_finding_id
 from core.project.findings_utils import load_findings_from_dir as _load_findings_from_dir
 from core.sarif.parser import merge_sarif
 
@@ -60,45 +58,8 @@ def _extract_date_from_dir(run_dir: Path) -> str:
     return run_dir.name
 
 
-def _finding_key(finding: Dict[str, Any]) -> tuple:
-    """Dedup key for a finding: (file, function, line). More stable than ID."""
-    return _dedup_key(finding)
-
-
-# Status progression: higher rank = more information about the finding.
-# When merging across runs, prefer the finding with the highest-ranked status
-# so that a correct ruling from one run isn't overwritten by stale data from
-# another run (e.g. one that hit a pipeline bug or where the LLM got it wrong).
-_STATUS_RANK = {
-    "exploitable": 7,
-    "confirmed_constrained": 6,
-    "confirmed_blocked": 6,
-    "confirmed_unverified": 5,
-    "confirmed": 5,
-    "ruled_out": 4,
-    "disproven": 4,
-    "false_positive": 4,
-    "test_code": 4,
-    "dead_code": 4,
-    "mitigated": 4,
-    "unreachable": 4,
-    "poc_success": 3,
-    "not_disproven": 2,
-}
-
-
-def _status_rank(finding: Dict[str, Any]) -> int:
-    """Return a rank for how far a finding has progressed through validation."""
-    status = finding.get("final_status") or finding.get("status") or ""
-    return _STATUS_RANK.get(status, 0)
-
-
 def merge_findings(run_dirs: List[Path]) -> List[Dict[str, Any]]:
-    """Merge findings from multiple runs. Deduplicate by (file, function, line).
-
-    When the same finding appears in multiple runs, prefer the version with the
-    most progressed status (e.g. "confirmed" beats "not_disproven"). Among equal
-    statuses, the latest run wins.
+    """Merge findings from multiple runs. Deduplicate by finding ID, latest wins.
 
     Args:
         run_dirs: Ordered list of run directories (later entries override earlier).
@@ -106,17 +67,19 @@ def merge_findings(run_dirs: List[Path]) -> List[Dict[str, Any]]:
     Returns:
         Deduplicated list of findings.
     """
-    merged: Dict[tuple, Dict[str, Any]] = {}
+    merged: Dict[str, Dict[str, Any]] = {}
+    no_id_findings: List[Dict[str, Any]] = []
 
     for run_dir in run_dirs:
         findings = _load_findings_from_dir(Path(run_dir))
         for finding in findings:
-            key = _finding_key(finding)
-            existing = merged.get(key)
-            if existing is None or _status_rank(finding) >= _status_rank(existing):
-                merged[key] = finding
+            fid = _get_finding_id(finding)
+            if fid:
+                merged[fid] = finding
+            else:
+                no_id_findings.append(finding)
 
-    return list(merged.values())
+    return list(merged.values()) + no_id_findings
 
 
 def verify_merge(merged_findings: List, source_findings_count: int,
@@ -158,15 +121,17 @@ def merge_runs(run_dirs: List[Path], output_dir: Path) -> Dict[str, Any]:
 
     # --- Merge findings ---
     total_findings = 0
-    all_keys: set = set()
+    all_ids: set = set()
     for run_dir in run_dirs:
         findings = _load_findings_from_dir(run_dir)
         total_findings += len(findings)
         for f in findings:
-            all_keys.add(_finding_key(f))
+            fid = _get_finding_id(f)
+            if fid:
+                all_ids.add(fid)
 
     merged = merge_findings(run_dirs)
-    unique_count = len(all_keys)
+    unique_count = len(all_ids)
 
     if not verify_merge(merged, total_findings, unique_count):
         logger.warning(
@@ -175,7 +140,7 @@ def merge_runs(run_dirs: List[Path], output_dir: Path) -> Dict[str, Any]:
         )
 
     if merged:
-        save_json(output_dir / "findings.json", {"findings": merged})
+        save_json(output_dir / "findings.json", merged)
 
     # --- Merge SARIF ---
     sarif_paths: List[str] = []
@@ -228,23 +193,16 @@ def merge_runs(run_dirs: List[Path], output_dir: Path) -> Dict[str, Any]:
                 shutil.copytree(str(item), str(dest))
                 artefacts_preserved += 1
 
-    vuln_count = _count_vulns(merged)
-
     stats = {
         "runs_merged": len(run_dirs),
         "total_findings": total_findings,
         "unique_findings": len(merged),
-        "unique_vulns": vuln_count,
         "sarif_files_merged": sarif_files_merged,
         "artefacts_preserved": artefacts_preserved,
     }
 
-    findings_label = f"{len(merged)} findings"
-    if vuln_count != len(merged):
-        findings_label = f"{vuln_count} findings"
-
     logger.info(
-        f"Merged {len(run_dirs)} runs: {findings_label}, "
+        f"Merged {len(run_dirs)} runs: {len(merged)} findings, "
         f"{sarif_files_merged} SARIF files, {artefacts_preserved} artefacts"
     )
 

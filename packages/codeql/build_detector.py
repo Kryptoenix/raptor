@@ -17,8 +17,7 @@ from typing import Dict, List, Optional
 import xml.etree.ElementTree as ET
 
 # Add parent directory to path for imports
-# packages/codeql/build_detector.py -> repo root
-sys.path.insert(0, str(Path(__file__).parents[2]))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from core.logging import get_logger
 
@@ -191,6 +190,16 @@ class BuildDetector:
         },
     }
 
+    # Languages where CodeQL can extract directly from source files without
+    # running a build command. For these languages, the CodeQL extractor parses
+    # source files directly — running pip install / npm install is unnecessary
+    # and often fails (missing deps, wrong Python version, no setup.py, etc.).
+    # Build commands for these languages are only needed if the user explicitly
+    # provides one via --build-command.
+    INTERPRETED_LANGUAGES = frozenset({
+        "python", "javascript", "typescript", "ruby",
+    })
+
     def __init__(self, repo_path: Path):
         """
         Initialize build detector.
@@ -207,6 +216,10 @@ class BuildDetector:
         """
         Detect build system for given language.
 
+        For interpreted languages (Python, JavaScript, TypeScript, Ruby),
+        returns a no-build configuration since CodeQL can extract directly
+        from source files without running pip/npm/bundle install.
+
         Args:
             language: Programming language
 
@@ -214,6 +227,12 @@ class BuildDetector:
             BuildSystem object or None if no build system detected
         """
         logger.info(f"Detecting build system for {language} in: {self.repo_path}")
+
+        # Interpreted languages: CodeQL extracts source directly, no build needed.
+        # Running pip install / npm install often fails and is unnecessary.
+        if language in self.INTERPRETED_LANGUAGES:
+            logger.info(f"✓ {language} is interpreted — using no-build mode (CodeQL extracts source directly)")
+            return self.generate_no_build_config(language)
 
         if language not in self.BUILD_SYSTEMS:
             logger.warning(f"No build system detection for language: {language}")

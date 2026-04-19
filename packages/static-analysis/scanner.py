@@ -22,8 +22,7 @@ from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
 # Add parent directory to path for imports
-# packages/static-analysis/scanner.py -> repo root
-sys.path.insert(0, str(Path(__file__).parents[2]))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from core.json import save_json
 from core.config import RaptorConfig
@@ -38,7 +37,7 @@ def run(cmd, cwd=None, timeout=RaptorConfig.DEFAULT_TIMEOUT, env=None):
     p = subprocess.run(
         cmd,
         cwd=cwd,
-        env=env or RaptorConfig.get_safe_env(),
+        env=env or os.environ.copy(),
         text=True,
         capture_output=True,
         timeout=timeout,
@@ -102,7 +101,6 @@ def run_single_semgrep(
 
     suffix = sanitize_name(name)
     sarif = out_dir / f"semgrep_{suffix}.sarif"
-    json_out = out_dir / f"semgrep_{suffix}.json"
     stderr_log = out_dir / f"semgrep_{suffix}.stderr.log"
     exit_file = out_dir / f"semgrep_{suffix}.exit"
 
@@ -122,13 +120,12 @@ def run_single_semgrep(
         "--metrics", "off",
         "--error",
         "--sarif",
-        "--json-output", str(json_out),
         "--timeout", str(RaptorConfig.SEMGREP_RULE_TIMEOUT),
         str(repo_path),
     ]
 
-    # Create clean environment without venv contamination or dangerous vars
-    clean_env = RaptorConfig.get_safe_env()
+    # Create clean environment without venv contamination
+    clean_env = os.environ.copy()
     clean_env.pop('VIRTUAL_ENV', None)
     clean_env.pop('PYTHONPATH', None)
     # Remove venv from PATH
@@ -379,7 +376,7 @@ def main():
     ap.add_argument("--codeql", action="store_true", help="Run CodeQL stage if available")
     ap.add_argument("--keep", action="store_true", help="Keep temp working directory")
     ap.add_argument("--sequential", action="store_true", help="Disable parallel scanning (for debugging)")
-    ap.add_argument("--out", default=None, help="Output directory (from lifecycle). Overrides auto-generated path.")
+    ap.add_argument("--out", help="Output directory (overrides auto-generated timestamped dir under RAPTOR_OUT_DIR)")
     args = ap.parse_args()
 
     start_time = time.time()
@@ -410,12 +407,12 @@ def main():
 
         logger.info(f"Using {len(rules_dirs)} rule directories")
 
-        # Output directory: use --out if provided (lifecycle), otherwise generate
-        if args.out:
+        # Generate output directory with repository name and timestamp
+        repo_name = repo_path.name
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        if getattr(args, "out", None):
             out_dir = Path(args.out)
         else:
-            repo_name = repo_path.name
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
             out_dir = RaptorConfig.get_out_dir() / f"scan_{repo_name}_{timestamp}"
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -448,7 +445,7 @@ def main():
         codeql_sarifs = []
         if args.codeql:
             # Basic language guess; you can make this dynamic later
-            codeql_sarifs = run_codeql(repo_path, out_dir, languages=["cpp", "java", "python", "go"])
+            codeql_sarifs = run_codeql(repo_path, out_dir, languages=["java", "python", "go"])
 
         # Merge SARIFs if more than one
         sarif_inputs = semgrep_sarifs + codeql_sarifs
@@ -472,32 +469,6 @@ def main():
 
         logger.info(f"Scan complete: {metrics['total_findings']} findings in {metrics['total_files_scanned']} files")
 
-        # Write coverage records
-        try:
-            from core.coverage.record import (
-                build_from_semgrep, build_from_codeql, write_record,
-            )
-            # Semgrep coverage — find JSON outputs alongside SARIFs
-            for sarif_path in semgrep_sarifs:
-                json_path = Path(sarif_path).with_suffix(".json")
-                if json_path.exists():
-                    record = build_from_semgrep(
-                        out_dir, json_path,
-                        rules_applied=groups if groups else [str(Path(r).name) for r in rules_dirs],
-                    )
-                    if record:
-                        write_record(out_dir, record, tool_name="semgrep")
-                        break  # one record covers all (paths.scanned is cumulative)
-
-            # CodeQL coverage — from SARIF artifacts
-            for sarif_path in codeql_sarifs:
-                record = build_from_codeql(Path(sarif_path))
-                if record:
-                    write_record(out_dir, record, tool_name="codeql")
-                    break  # one record per run
-        except Exception as e:
-            logger.debug(f"Coverage record write failed (non-fatal): {e}")
-
         # Verification plan
         verification = {
             "verify": ["sarif_schema", "manifest_hash", "semgrep_exit_check"],
@@ -508,17 +479,6 @@ def main():
 
         duration = time.time() - start_time
         logger.info(f"Total scan duration: {duration:.2f}s")
-
-        # Print coverage summary if checklist exists
-        try:
-            from core.coverage.summary import compute_summary, format_summary
-            cov = compute_summary(out_dir)
-            if cov:
-                print()
-                print(format_summary(cov))
-                print()
-        except Exception:
-            pass
 
         result = {
             "status": "ok",

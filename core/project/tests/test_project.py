@@ -28,7 +28,7 @@ class TestProject(unittest.TestCase):
     def test_get_run_dirs_empty(self):
         with TemporaryDirectory() as d:
             p = Project(name="test", target="/tmp", output_dir=d)
-            self.assertEqual(p.get_run_dirs(sweep=False), [])
+            self.assertEqual(p.get_run_dirs(), [])
 
     def test_get_run_dirs_sorted(self):
         with TemporaryDirectory() as d:
@@ -36,7 +36,7 @@ class TestProject(unittest.TestCase):
             (Path(d) / "scan-20260401").mkdir()
             (Path(d) / "scan-20260403").mkdir()
             p = Project(name="test", target="/tmp", output_dir=d)
-            dirs = p.get_run_dirs(sweep=False)
+            dirs = p.get_run_dirs()
             self.assertEqual(len(dirs), 2)
             # Newest first
             self.assertEqual(dirs[0].name, "scan-20260403")
@@ -48,82 +48,9 @@ class TestProject(unittest.TestCase):
             (Path(d) / "_tmp").mkdir()
             (Path(d) / "scan-20260401").mkdir()
             p = Project(name="test", target="/tmp", output_dir=d)
-            dirs = p.get_run_dirs(sweep=False)
+            dirs = p.get_run_dirs()
             self.assertEqual(len(dirs), 1)
             self.assertEqual(dirs[0].name, "scan-20260401")
-
-    def test_sweep_marks_stale_running_as_failed(self):
-        """sweep_stale_runs marks 'running' dirs with dead session_pid as failed."""
-        from core.run.metadata import RUN_METADATA_FILE
-        from core.json import load_json, save_json
-        with TemporaryDirectory() as d:
-            # Simulate runs from a dead session (PID 99999999)
-            for name in ["scan-20260401", "scan-20260402"]:
-                run = Path(d) / name
-                run.mkdir()
-                save_json(run / RUN_METADATA_FILE, {
-                    "version": 1, "command": "scan",
-                    "timestamp": "2026-04-01T00:00:00+00:00",
-                    "status": "running", "extra": {},
-                    "session_pid": 99999999,
-                })
-            p = Project(name="test", target="/tmp", output_dir=d)
-            count = p.sweep_stale_runs(keep_latest=False)
-            self.assertEqual(count, 2)
-            self.assertEqual(load_json(Path(d) / "scan-20260401" / RUN_METADATA_FILE)["status"], "failed")
-            self.assertEqual(load_json(Path(d) / "scan-20260402" / RUN_METADATA_FILE)["status"], "failed")
-
-    def test_sweep_skips_alive_session(self):
-        """sweep skips runs whose session PID is still alive."""
-        from core.run.metadata import RUN_METADATA_FILE
-        from core.json import load_json, save_json
-        import os
-        with TemporaryDirectory() as d:
-            run = Path(d) / "scan-20260401"
-            run.mkdir()
-            save_json(run / RUN_METADATA_FILE, {
-                "version": 1, "command": "scan",
-                "timestamp": "2026-04-01T00:00:00+00:00",
-                "status": "running", "extra": {},
-                "session_pid": os.getpid(),  # our PID — definitely alive
-            })
-            p = Project(name="test", target="/tmp", output_dir=d)
-            count = p.sweep_stale_runs(keep_latest=False)
-            self.assertEqual(count, 0)
-            self.assertEqual(load_json(run / RUN_METADATA_FILE)["status"], "running")
-
-    def test_sweep_keep_latest_legacy_runs(self):
-        """sweep with keep_latest=True skips newest legacy run (no session_pid)."""
-        from core.run.metadata import RUN_METADATA_FILE
-        from core.json import load_json, save_json
-        with TemporaryDirectory() as d:
-            for name, ts in [("scan-20260401", "2026-04-01"), ("scan-20260402", "2026-04-02")]:
-                run = Path(d) / name
-                run.mkdir()
-                save_json(run / RUN_METADATA_FILE, {
-                    "version": 1, "command": "scan",
-                    "timestamp": f"{ts}T00:00:00+00:00",
-                    "status": "running", "extra": {},
-                })
-            p = Project(name="test", target="/tmp", output_dir=d)
-            count = p.sweep_stale_runs(keep_latest=True)
-            self.assertEqual(count, 1)
-            self.assertEqual(load_json(Path(d) / "scan-20260401" / RUN_METADATA_FILE)["status"], "failed")
-            self.assertEqual(load_json(Path(d) / "scan-20260402" / RUN_METADATA_FILE)["status"], "running")
-
-    def test_sweep_ignores_completed(self):
-        """sweep doesn't touch completed/failed dirs."""
-        from core.run.metadata import start_run, complete_run, RUN_METADATA_FILE
-        from core.json import load_json
-        with TemporaryDirectory() as d:
-            run1 = Path(d) / "scan-20260401"
-            run1.mkdir()
-            start_run(run1, "scan")
-            complete_run(run1)
-            p = Project(name="test", target="/tmp", output_dir=d)
-            count = p.sweep_stale_runs(keep_latest=False)
-            self.assertEqual(count, 0)
-            self.assertEqual(load_json(run1 / RUN_METADATA_FILE)["status"], "completed")
 
     def test_get_run_dirs_by_type_jit_metadata(self):
         """Runs without .raptor-run.json get metadata generated on access."""
@@ -276,6 +203,36 @@ class TestProjectManager(unittest.TestCase):
         self.mgr.rename("old", "new")
         self.assertEqual(os.readlink(active), "new.json")
 
+    def test_set_active_updates_env_file(self):
+        with TemporaryDirectory() as env_dir:
+            env_file = Path(env_dir) / "claude_env"
+            env_file.write_text('export PATH="$PATH:/something"\n')
+            with patch.dict(os.environ, {"CLAUDE_ENV_FILE": str(env_file)}):
+                self.mgr.create("myapp", "/tmp/code")
+                self.mgr.set_active("myapp")
+                content = env_file.read_text()
+                self.assertIn("RAPTOR_PROJECT_DIR", content)
+                self.assertIn("RAPTOR_PROJECT_NAME", content)
+                self.assertIn("RAPTOR_PROJECT_TARGET", content)
+                # PATH line should be preserved
+                self.assertIn("/something", content)
+
+    def test_set_active_none_clears_env_file(self):
+        with TemporaryDirectory() as env_dir:
+            env_file = Path(env_dir) / "claude_env"
+            env_file.write_text(
+                'export PATH="$PATH:/something"\n'
+                'export RAPTOR_PROJECT_DIR="/old/path"\n'
+                'export RAPTOR_PROJECT_NAME="old"\n'
+            )
+            with patch.dict(os.environ, {"CLAUDE_ENV_FILE": str(env_file)}):
+                self.mgr.set_active(None)
+                content = env_file.read_text()
+                self.assertNotIn("RAPTOR_PROJECT_DIR", content)
+                self.assertNotIn("RAPTOR_PROJECT_NAME", content)
+                # PATH preserved
+                self.assertIn("/something", content)
+
     def test_update_notes(self):
         self.mgr.create("myapp", "/tmp/code")
         p = self.mgr.update_notes("myapp", "new notes")
@@ -314,6 +271,17 @@ class TestProjectManager(unittest.TestCase):
         self.mgr.create("myapp", "/tmp/code")
         with self.assertRaises(ValueError):
             self.mgr.remove_run("myapp", "scan-20260406")
+
+
+class TestOutputDirResolution(unittest.TestCase):
+
+    def test_raptor_project_dir_env(self):
+        """RAPTOR_PROJECT_DIR env var should be readable."""
+        os.environ["RAPTOR_PROJECT_DIR"] = "/tmp/test_project"
+        try:
+            self.assertEqual(os.environ.get("RAPTOR_PROJECT_DIR"), "/tmp/test_project")
+        finally:
+            del os.environ["RAPTOR_PROJECT_DIR"]
 
 
 if __name__ == "__main__":

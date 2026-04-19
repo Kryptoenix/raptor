@@ -14,14 +14,13 @@ class TestAddDirectory(unittest.TestCase):
     def setUp(self):
         self.tmpdir = TemporaryDirectory()
         self.projects_dir = Path(self.tmpdir.name) / "projects"
-        self.output_dir = str(Path(self.tmpdir.name) / "output")
         self.mgr = ProjectManager(projects_dir=self.projects_dir)
 
     def tearDown(self):
         self.tmpdir.cleanup()
 
     def test_add_single_run(self):
-        self.mgr.create("myapp", "/tmp/code", output_dir=self.output_dir)
+        self.mgr.create("myapp", "/tmp/code")
         run_dir = Path(self.tmpdir.name) / "scan-20260406"
         run_dir.mkdir()
         (run_dir / "findings.json").write_text("[]")
@@ -29,7 +28,7 @@ class TestAddDirectory(unittest.TestCase):
         self.assertEqual(added, 1)
 
     def test_add_directory_of_runs(self):
-        self.mgr.create("myapp", "/tmp/code", output_dir=self.output_dir)
+        self.mgr.create("myapp", "/tmp/code")
         runs = Path(self.tmpdir.name) / "runs"
         runs.mkdir()
         for name in ["scan_vulns_20260401", "scan_vulns_20260402", "raptor_vulns_20260403"]:
@@ -58,7 +57,7 @@ class TestAddDirectory(unittest.TestCase):
             self.mgr.add_directory("newproject", str(run_dir))
 
     def test_generates_run_metadata(self):
-        self.mgr.create("myapp", "/tmp/code", output_dir=self.output_dir)
+        self.mgr.create("myapp", "/tmp/code")
         run_dir = Path(self.tmpdir.name) / "scan_vulns_20260406_100000"
         run_dir.mkdir()
         (run_dir / "findings.json").write_text("[]")
@@ -69,7 +68,7 @@ class TestAddDirectory(unittest.TestCase):
         self.assertTrue((moved_dir / RUN_METADATA_FILE).exists())
 
     def test_prefix_inference(self):
-        self.mgr.create("myapp", "/tmp/code", output_dir=self.output_dir)
+        self.mgr.create("myapp", "/tmp/code")
         for name, expected_cmd in [
             ("scan_vulns_20260406", "scan"),
             ("raptor_vulns_20260406", "agentic"),
@@ -98,7 +97,7 @@ class TestAddDirectory(unittest.TestCase):
         self.assertIn("validate", types)
 
     def test_skip_non_run_directories(self):
-        self.mgr.create("myapp", "/tmp/code", output_dir=self.output_dir)
+        self.mgr.create("myapp", "/tmp/code")
         runs = Path(self.tmpdir.name) / "mixed"
         runs.mkdir()
         (runs / "scan_20260406").mkdir()

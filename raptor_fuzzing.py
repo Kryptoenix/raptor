@@ -36,14 +36,418 @@ from packages.autonomous import (
 logger = get_logger()
 
 
+# ---------------------------------------------------------------------------
+# Phase 0: AFL++ instrumentation from source
+# ---------------------------------------------------------------------------
+
+def _instrument_from_source(
+    repo_path: Path, out_dir: Path, args
+) -> tuple:
+    """
+    Detect build system, recompile with AFL++ instrumentation, and find
+    the resulting binary.
+
+    Also auto-discovers corpus/ and *.dict files from the repo.
+
+    Args:
+        repo_path: Path to the source repository
+        out_dir: Output directory for build artifacts
+        args: Parsed CLI arguments (for --asan, --target-binary)
+
+    Returns:
+        (binary_path, corpus_dir, dict_path) — binary_path is None on failure
+    """
+    import shutil
+    import subprocess as _sp
+    import os as _os
+    import stat as _stat
+
+    print("\n" + "=" * 70)
+    print("PHASE 0: AFL++ INSTRUMENTATION")
+    print("=" * 70)
+
+    logger.info("=" * 70)
+    logger.info("PHASE 0: AFL++ INSTRUMENTATION FROM SOURCE")
+    logger.info("=" * 70)
+    logger.info("Repository: %s", repo_path)
+
+    # ── Check AFL++ compiler availability ────────────────────────────────
+    afl_cc = shutil.which("afl-clang-fast") or shutil.which("afl-gcc")
+    afl_cxx = shutil.which("afl-clang-fast++") or shutil.which("afl-g++")
+
+    if not afl_cc:
+        logger.error(
+            "AFL++ compiler not found. Install AFL++ and ensure afl-clang-fast "
+            "or afl-gcc is on PATH.\n"
+            "  Ubuntu/Debian: sudo apt install afl++\n"
+            "  macOS: brew install aflplusplus"
+        )
+        print("✗ AFL++ compiler not found (need afl-clang-fast or afl-gcc)")
+        return None, None, None
+
+    logger.info("AFL++ compiler: %s", afl_cc)
+    if afl_cxx:
+        logger.info("AFL++ C++ compiler: %s", afl_cxx)
+
+    # ── Detect build system ──────────────────────────────────────────────
+    build_system, build_cmd, build_dir = _detect_fuzz_build(repo_path)
+    if not build_cmd:
+        logger.error("Could not detect build system in %s", repo_path)
+        print("✗ No supported build system found (need Makefile, CMakeLists.txt, configure, or meson.build)")
+        return None, None, None
+
+    logger.info("Build system: %s", build_system)
+    logger.info("Build command: %s", build_cmd)
+
+    # ── Build with AFL++ instrumentation ─────────────────────────────────
+    env = _os.environ.copy()
+    env["CC"] = afl_cc
+    if afl_cxx:
+        env["CXX"] = afl_cxx
+
+    # Enable ASAN if requested
+    if getattr(args, 'asan', False):
+        env["AFL_USE_ASAN"] = "1"
+        logger.info("AddressSanitizer: ENABLED")
+        print("  ASAN: enabled")
+    else:
+        logger.info("AddressSanitizer: disabled (use --asan to enable)")
+
+    # Suppress AFL++ instrumentation banner noise
+    env["AFL_QUIET"] = "1"
+
+    build_out = out_dir / "build_log.txt"
+    logger.info("Building with AFL++ instrumentation...")
+    print(f"  Compiler: {afl_cc}")
+    print(f"  Build system: {build_system}")
+    print(f"  Building...")
+
+    try:
+        result = _sp.run(
+            build_cmd,
+            shell=True,
+            cwd=str(build_dir),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,  # 5 minute build timeout
+        )
+
+        # Save build log
+        build_out.write_text(
+            f"=== STDOUT ===\n{result.stdout}\n\n=== STDERR ===\n{result.stderr}\n",
+            encoding="utf-8",
+        )
+
+        if result.returncode != 0:
+            logger.error("Build failed (exit %d). See %s", result.returncode, build_out)
+            # Show last 20 lines of stderr for quick diagnosis
+            stderr_lines = result.stderr.strip().splitlines()
+            for line in stderr_lines[-20:]:
+                logger.error("  %s", line)
+            print(f"✗ Build failed (exit {result.returncode}). Check {build_out}")
+            return None, None, None
+
+        logger.info("✓ Build succeeded")
+        print("  ✓ Build succeeded")
+
+    except _sp.TimeoutExpired:
+        logger.error("Build timed out after 300s")
+        print("✗ Build timed out (5 min limit)")
+        return None, None, None
+    except Exception as exc:
+        logger.error("Build error: %s", exc)
+        print(f"✗ Build error: {exc}")
+        return None, None, None
+
+    # ── Find the instrumented binary ─────────────────────────────────────
+    target_name = getattr(args, 'target_binary', None)
+    binary_path = _find_instrumented_binary(repo_path, build_dir, target_name)
+
+    if not binary_path:
+        logger.error("Could not find instrumented binary after build")
+        print("✗ No ELF binary found after build. Use --target-binary <name> to specify.")
+        return None, None, None
+
+    # Ensure executable
+    binary_path.chmod(binary_path.stat().st_mode | 0o111)
+    logger.info("✓ Instrumented binary: %s", binary_path)
+    print(f"  ✓ Binary: {binary_path.relative_to(repo_path) if binary_path.is_relative_to(repo_path) else binary_path}")
+
+    # ── Auto-discover corpus ─────────────────────────────────────────────
+    corpus_dir = None
+    for candidate in ("corpus", "seeds", "testcases", "inputs", "in"):
+        corpus_candidate = repo_path / candidate
+        if corpus_candidate.is_dir() and any(corpus_candidate.iterdir()):
+            corpus_dir = corpus_candidate
+            logger.info("✓ Found corpus: %s/ (%d files)",
+                        candidate, sum(1 for _ in corpus_candidate.iterdir()))
+            print(f"  ✓ Corpus: {candidate}/ ({sum(1 for _ in corpus_candidate.iterdir())} seed files)")
+            break
+
+    if not corpus_dir:
+        logger.info("No corpus directory found — AFL++ will use a default seed")
+        print("  ℹ No corpus/ directory — will use default seeds")
+
+    # ── Auto-discover dictionary ─────────────────────────────────────────
+    dict_path = None
+    for df in sorted(repo_path.glob("*.dict")):
+        dict_path = df
+        logger.info("✓ Found dictionary: %s", df.name)
+        print(f"  ✓ Dictionary: {df.name}")
+        break
+    # Also check common locations
+    if not dict_path:
+        for candidate in ("dictionary.dict", "dict/fuzzing.dict", "fuzz.dict"):
+            df = repo_path / candidate
+            if df.exists():
+                dict_path = df
+                logger.info("✓ Found dictionary: %s", candidate)
+                print(f"  ✓ Dictionary: {candidate}")
+                break
+
+    print()
+    return binary_path, corpus_dir, dict_path
+
+
+def _detect_fuzz_build(repo_path: Path) -> tuple:
+    """
+    Detect build system and return (system_name, build_command, build_dir).
+    Returns (None, None, None) if no supported build system found.
+    """
+    # Priority order: Makefile > CMake > autotools > meson > bare gcc
+    if (repo_path / "Makefile").exists() or (repo_path / "makefile").exists():
+        return "make", "make clean 2>/dev/null; make", repo_path
+
+    if (repo_path / "CMakeLists.txt").exists():
+        build_dir = repo_path / "build"
+        build_dir.mkdir(exist_ok=True)
+        return "cmake", f"cmake -S {repo_path} -B {build_dir} && cmake --build {build_dir}", build_dir
+
+    if (repo_path / "configure").exists():
+        return "autotools", "./configure && make", repo_path
+
+    if (repo_path / "configure.ac").exists() or (repo_path / "configure.in").exists():
+        return "autotools", "autoreconf -i && ./configure && make", repo_path
+
+    if (repo_path / "meson.build").exists():
+        build_dir = repo_path / "builddir"
+        return "meson", f"meson setup {build_dir} && meson compile -C {build_dir}", repo_path
+
+    # Fallback: look for a single .c file and compile it directly
+    c_files = list(repo_path.glob("*.c"))
+    if len(c_files) == 1:
+        stem = c_files[0].stem
+        return "gcc", f"$CC -o {stem} {c_files[0].name}", repo_path
+    elif c_files:
+        # Multiple .c files — try compiling all into one binary
+        names = " ".join(f.name for f in c_files)
+        return "gcc", f"$CC -o fuzz_target {names}", repo_path
+
+    return None, None, None
+
+
+def _find_instrumented_binary(
+    repo_path: Path, build_dir: Path, target_name: str = None,
+) -> Path:
+    """
+    Find the ELF binary produced by the build.
+
+    If target_name is specified, look for that name.
+    Otherwise, find all ELF binaries created/modified during the build
+    and pick the most likely fuzz target.
+    """
+    import os as _os
+
+    # If user specified a target name, look for it
+    if target_name:
+        for search_dir in (build_dir, repo_path):
+            for candidate in search_dir.rglob(target_name):
+                if candidate.is_file() and _is_elf(candidate):
+                    return candidate
+        # Also check without path
+        candidate = build_dir / target_name
+        if candidate.exists() and _is_elf(candidate):
+            return candidate
+        candidate = repo_path / target_name
+        if candidate.exists() and _is_elf(candidate):
+            return candidate
+        return None
+
+    # Auto-discover: find all ELF executables in repo and build dirs
+    candidates = []
+    search_dirs = {repo_path}
+    if build_dir != repo_path:
+        search_dirs.add(build_dir)
+
+    for search_dir in search_dirs:
+        for f in search_dir.rglob("*"):
+            if not f.is_file():
+                continue
+            # Skip common non-targets
+            if f.suffix in (".o", ".a", ".so", ".dylib", ".py", ".sh", ".txt", ".md", ".h", ".c", ".cpp"):
+                continue
+            if any(skip in f.parts for skip in ("__pycache__", ".git", "node_modules", "corpus", "seeds")):
+                continue
+            if _is_elf(f):
+                candidates.append(f)
+
+    if not candidates:
+        return None
+
+    if len(candidates) == 1:
+        return candidates[0]
+
+    # Multiple binaries — prefer ones with "fuzz" in the name, then largest
+    for c in candidates:
+        if "fuzz" in c.name.lower():
+            return c
+
+    # Return the largest binary (most likely the main target)
+    return max(candidates, key=lambda c: c.stat().st_size)
+
+
+def _is_elf(path: Path) -> bool:
+    """Check if a file is an ELF binary."""
+    try:
+        with open(path, "rb") as f:
+            return f.read(4) == b"\x7fELF"
+    except (OSError, IOError):
+        return False
+
+
+def _detect_input_mode(binary_path: Path) -> str:
+    """
+    Probe whether a binary reads from stdin or expects file arguments.
+
+    Strategy:
+    1. Check --help / usage output for file argument patterns
+    2. Run the binary with stdin closed — if it prints a usage message
+       mentioning filenames, it expects file args, not stdin
+    3. Check common tool names known to use file args
+
+    Returns "stdin" or "file".
+    """
+    import subprocess as _sp
+
+    binary_name = binary_path.name.lower()
+
+    # ── Known file-argument tools (fast path) ────────────────────────────
+    _FILE_ARG_BINARIES = {
+        "lame", "ffmpeg", "ffprobe", "objdump", "readelf", "nm",
+        "convert", "identify", "tiff2pdf", "tiffcp",
+        "exiv2", "djpeg", "cjpeg", "pngfix", "optipng",
+        "xmllint", "xsltproc", "jq",
+        "file", "strings", "strip", "objcopy",
+        "nasm", "yasm", "as",
+        "bison", "flex", "yacc",
+        "unzip", "gzip", "bzip2", "xz", "zstd",
+        "tar", "cpio", "ar",
+        "pdf2txt", "pdftotext", "mutool",
+    }
+    if binary_name in _FILE_ARG_BINARIES:
+        logger.info("Known file-argument binary: %s → using file input mode", binary_name)
+        return "file"
+
+    # ── Probe --help output for file argument patterns ───────────────────
+    for help_flag in ("--help", "-h", "-help"):
+        try:
+            result = _sp.run(
+                [str(binary_path), help_flag],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                stdin=_sp.DEVNULL,
+            )
+            output = (result.stdout + result.stderr).lower()
+
+            # Look for patterns indicating file arguments
+            _FILE_PATTERNS = [
+                "input file", "input_file", "infile",
+                "output file", "output_file", "outfile",
+                "<filename", "<file>", "<input>",
+                "[file]", "[input]", "[filename]",
+                "usage:", "synopsis:",
+            ]
+            file_hints = sum(1 for p in _FILE_PATTERNS if p in output)
+
+            # Look for patterns indicating stdin
+            _STDIN_PATTERNS = [
+                "reads from stdin", "standard input", "read from stdin",
+                "reads stdin", "pipe", "< input",
+            ]
+            stdin_hints = sum(1 for p in _STDIN_PATTERNS if p in output)
+
+            if file_hints > stdin_hints and file_hints >= 2:
+                logger.info("Help output suggests file-argument mode (%d file hints vs %d stdin hints)",
+                            file_hints, stdin_hints)
+                return "file"
+            if stdin_hints > file_hints:
+                logger.info("Help output suggests stdin mode (%d stdin hints vs %d file hints)",
+                            stdin_hints, file_hints)
+                return "stdin"
+
+        except (_sp.TimeoutExpired, OSError):
+            continue
+
+    # ── Probe: run with empty stdin, check if it errors about missing file ─
+    try:
+        result = _sp.run(
+            [str(binary_path)],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            stdin=_sp.DEVNULL,
+        )
+        output = (result.stdout + result.stderr).lower()
+        # If the binary complained about missing input file, it wants file args
+        if any(phrase in output for phrase in (
+            "no input file", "missing input", "no file", "nothing to do",
+            "usage:", "no input", "specify input", "expected file",
+            "requires an argument", "no arguments",
+        )):
+            logger.info("Binary complained about missing file argument → file mode")
+            return "file"
+    except (_sp.TimeoutExpired, OSError):
+        pass
+
+    # Default to stdin
+    return "stdin"
+
+
 def main() -> None:
-    # So much more needed here but this is a start for us. :-)
     ap = argparse.ArgumentParser(
-        description="RAPTOR Fuzzing Mode - Binary fuzzing with LLM analysis"
+        description="RAPTOR Fuzzing Mode - Binary fuzzing with LLM analysis",
+        epilog="""
+Two modes of operation:
+
+  Source mode (--repo):
+    Upload a C/C++ source repository. RAPTOR will automatically:
+    - Detect the build system (Makefile, CMake, autotools, meson)
+    - Recompile with AFL++ instrumentation (afl-clang-fast)
+    - Optionally enable AddressSanitizer (ASAN)
+    - Find the resulting binary
+    - Use corpus/ directory and *.dict files if present in the repo
+
+  Binary mode (--binary):
+    Provide a pre-compiled binary (must be instrumented with AFL++).
+
+  Repo structure for source mode:
+    project/
+    ├── src/            # or Makefile, CMakeLists.txt, etc.
+    ├── corpus/         # (optional) seed inputs for AFL++
+    ├── dictionary.dict # (optional) AFL++ dictionary
+    └── Makefile        # build system
+""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    ap.add_argument("--binary", required=True, help="Path to binary to fuzz")
-    ap.add_argument("--corpus", help="Path to seed corpus directory (optional)")
+    # Input: either --repo (source) or --binary (pre-compiled)
+    input_group = ap.add_mutually_exclusive_group(required=True)
+    input_group.add_argument("--repo", help="Path to C/C++ source repository (will be instrumented with AFL++)")
+    input_group.add_argument("--binary", help="Path to pre-instrumented binary to fuzz")
+
+    ap.add_argument("--corpus", help="Path to seed corpus directory (auto-detected from repo/corpus/ if not set)")
     ap.add_argument("--duration", type=int, default=3600, help="Fuzzing duration in seconds (default: 3600)")
     ap.add_argument("--parallel", type=int, default=1, help="Number of parallel AFL instances (default: 1)")
     ap.add_argument("--max-crashes", type=int, default=10, help="Maximum crashes to analyse (default: 10)")
@@ -57,17 +461,47 @@ def main() -> None:
     ap.add_argument("--autonomous", action="store_true", help="Enable autonomous mode with intelligent decision-making and learning")
     ap.add_argument("--memory-file", help="Path to memory file for learning persistence (default: ~/.raptor/fuzzing_memory.json)")
     ap.add_argument("--goal", help="High-level goal to achieve (e.g., 'find heap overflow', 'target parser code')")
+    ap.add_argument("--asan", action="store_true", help="Enable AddressSanitizer when instrumenting from source (--repo mode)")
+    ap.add_argument("--target-binary", help="Name of the binary to fuzz after building (if repo produces multiple binaries)")
 
     args = ap.parse_args()
 
-    binary_path = Path(args.binary).resolve()
-    if not binary_path.exists():
-        logger.error(f"Binary not found: {binary_path}")
-        sys.exit(1)
+    # ========================================================================
+    # PHASE 0: SOURCE INSTRUMENTATION (--repo mode only)
+    # ========================================================================
+    if args.repo:
+        repo_path = Path(args.repo).resolve()
+        if not repo_path.exists():
+            logger.error("Repository not found: %s", repo_path)
+            sys.exit(1)
 
-    corpus_dir = Path(args.corpus) if args.corpus else None
-    out_dir = Path(args.out) if args.out else Path(f"out/fuzz_{binary_path.stem}_{int(time.time())}")
-    out_dir.mkdir(parents=True, exist_ok=True)
+        out_dir = Path(args.out) if args.out else Path(f"out/fuzz_{repo_path.name}_{int(time.time())}")
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        binary_path, corpus_dir, dict_path = _instrument_from_source(
+            repo_path, out_dir, args
+        )
+
+        if binary_path is None:
+            logger.error("Instrumentation failed — cannot proceed to fuzzing")
+            sys.exit(1)
+
+        # Use auto-detected corpus/dict unless user overrode them
+        if args.corpus:
+            corpus_dir = Path(args.corpus)
+        if args.dict:
+            dict_path = Path(args.dict)
+
+    else:
+        binary_path = Path(args.binary).resolve()
+        if not binary_path.exists():
+            logger.error("Binary not found: %s", binary_path)
+            sys.exit(1)
+
+        corpus_dir = Path(args.corpus) if args.corpus else None
+        dict_path = Path(args.dict) if args.dict else None
+        out_dir = Path(args.out) if args.out else Path(f"out/fuzz_{binary_path.stem}_{int(time.time())}")
+        out_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info("=" * 70)
     logger.info("RAPTOR FUZZING WORKFLOW STARTED")
@@ -83,15 +517,18 @@ def main() -> None:
     logger.info(f"Sanitizer check: {'enabled' if args.check_sanitizers else 'disabled'}")
     logger.info(f"Recompile guide: {'will be shown' if args.recompile_guide else 'disabled'}")
     logger.info(f"Coverage analysis: {'enabled' if args.use_showmap else 'disabled'}")
-    logger.info(f"Input mode: {args.input_mode}")
-    if args.dict:
-        logger.info(f"Dictionary: {args.dict}")
-    if args.check_sanitizers:
-        logger.info("Sanitizer check: enabled")
-    if args.recompile_guide:
-        logger.info("Recompile guide: will be shown")
-    if args.use_showmap:
-        logger.info("Coverage analysis: enabled")
+
+    # ── Auto-detect input mode if user didn't explicitly set it ──────────
+    # Many binaries (lame, ffmpeg, objdump, etc.) read from file arguments,
+    # not stdin. If the user left input-mode at the default ("stdin"), probe
+    # the binary to see if it actually reads from stdin. If not, switch to
+    # file mode so AFL uses @@ substitution.
+    if args.input_mode == "stdin":
+        detected_mode = _detect_input_mode(binary_path)
+        if detected_mode == "file":
+            args.input_mode = "file"
+            logger.info("Auto-detected input mode: file (binary doesn't read stdin)")
+            print(f"  ℹ Auto-detected input mode: file (using @@ substitution)")
 
     # ========================================================================
     # AUTONOMOUS SYSTEM INITIALIZATION
@@ -169,7 +606,7 @@ def main() -> None:
             binary_path=binary_path,
             corpus_dir=corpus_dir,
             output_dir=out_dir / "afl_output",
-            dict_path=Path(args.dict) if args.dict else None,
+            dict_path=dict_path,
             input_mode=args.input_mode,
             check_sanitizers=args.check_sanitizers,
             recompile_guide=args.recompile_guide,
@@ -328,7 +765,7 @@ def main() -> None:
                         logger.info("Validating and refining exploit...")
 
                         # Get the generated exploit code
-                        exploit_file = out_dir / "analysis" / "exploits" / f"{crash.crash_id}_exploit.c"
+                        exploit_file = out_dir / "analysis" / "exploits" / f"{crash.crash_id}_exploit.cpp"
                         if exploit_file.exists():
                             exploit_code = exploit_file.read_text()
 

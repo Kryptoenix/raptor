@@ -4,15 +4,12 @@ Centralises the logic for choosing where a command writes its output.
 Checks (in order): explicit --out argument, active project, default out/ dir.
 """
 
-import logging
 import os
 import time
 from pathlib import Path
 from typing import Optional, Tuple
 
 from core.config import RaptorConfig
-
-logger = logging.getLogger(__name__)
 
 
 class TargetMismatchError(ValueError):
@@ -21,13 +18,15 @@ class TargetMismatchError(ValueError):
 
 
 def _resolve_active_project() -> Optional[Tuple[str, str, str]]:
-    """Resolve the current active project from the .active symlink.
+    """Resolve the current active project, checking symlink first.
 
     Returns (output_dir, name, target) or None if no project is active.
-    The symlink is the single source of truth — no env var fallback.
+    The .active symlink is checked first (reflects mid-session changes),
+    falling back to env vars (set at launch).
     """
+    # 1. Check .active symlink (current truth — survives `project use` mid-session)
     try:
-        from core.project.project import ProjectManager
+        from core.project.project import PROJECTS_DIR, ProjectManager
         mgr = ProjectManager()
         active_name = mgr.get_active()
         if active_name:
@@ -36,6 +35,15 @@ def _resolve_active_project() -> Optional[Tuple[str, str, str]]:
                 return project.output_dir, project.name, project.target
     except Exception:
         pass
+
+    # 2. Fall back to env vars (set at launch by bin/raptor)
+    project_dir = os.environ.get("RAPTOR_PROJECT_DIR")
+    if project_dir:
+        return (
+            project_dir,
+            os.environ.get("RAPTOR_PROJECT_NAME", ""),
+            os.environ.get("RAPTOR_PROJECT_TARGET", ""),
+        )
 
     return None
 
@@ -62,9 +70,6 @@ def get_output_dir(command: str, target_name: str = "", explicit_out: str = None
         TargetMismatchError: If target_path is outside the active project's target.
     """
     if explicit_out:
-        active = _resolve_active_project()
-        if active:
-            logger.warning("--out overrides active project '%s' output directory", active[1])
         return Path(explicit_out).resolve()
 
     active = _resolve_active_project()
@@ -108,6 +113,6 @@ def _check_target_mismatch(target_path: str, project_name: str,
     raise TargetMismatchError(
         f"target {resolved} is outside project {project_name} ({project_resolved})\n"
         f"  A project tracks one target. To analyze a different codebase:\n"
-        f"    /project create <name> --target {resolved}\n"
-        f"    /project use none"
+        f"    raptor project create <name> --target {resolved}\n"
+        f"    raptor project use none"
     )

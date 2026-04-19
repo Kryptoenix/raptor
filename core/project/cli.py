@@ -9,6 +9,7 @@ import os
 import sys
 from pathlib import Path
 
+from .findings_utils import get_finding_id
 from .project import ProjectManager
 
 
@@ -24,158 +25,108 @@ def _red(text): return _c(text, "31")
 def _yellow(text): return _c(text, "33")
 
 
-class _Fmt(argparse.HelpFormatter):
-    """Wider help alignment for subcommand option lists."""
-    def __init__(self, prog):
-        super().__init__(prog, max_help_position=34)
-
-
 def main():
-    parser = argparse.ArgumentParser(
-        prog="raptor project",
-        usage="raptor project <command> [args]",
-        description="Manage RAPTOR projects. Run 'raptor project help <command>' for details.",
-        formatter_class=lambda prog: argparse.HelpFormatter(prog, max_help_position=20),
-    )
-    sub = parser.add_subparsers(dest="subcommand", title="commands", metavar="")
-    _F = {"formatter_class": _Fmt}  # shorthand for subparsers
+    parser = argparse.ArgumentParser(prog="raptor project", description="Manage RAPTOR projects")
+    sub = parser.add_subparsers(dest="subcommand")
 
     # create
-    p_create = sub.add_parser("create", help="Create a new project",
-                              usage="raptor project create <name> --target <path> [-d <desc>] [--output-dir <dir>]", **_F)
-    p_create.add_argument("name", help="Project name")
-    p_create.add_argument("--target", required=True, metavar="<path>", help="Path to target codebase")
-    p_create.add_argument("-d", "--description", default="", metavar="<text>", help="One-line description")
-    p_create.add_argument("--output-dir", default=None, metavar="<dir>", help="Custom output directory")
+    p_create = sub.add_parser("create", help="Create a new project")
+    p_create.add_argument("name")
+    p_create.add_argument("--target", required=True, help="Path to target codebase")
+    p_create.add_argument("-d", "--description", default="", help="One-line description")
+    p_create.add_argument("--output-dir", default=None, help="Custom output directory")
 
     # use
-    p_use = sub.add_parser("use", help="Set the active project (no arg = show current)",
-                           usage="raptor project use [<name>]", **_F)
+    p_use = sub.add_parser("use", help="Set the active project (no arg = show current)")
     p_use.add_argument("name", nargs="?", help="Project name, 'none' to clear")
 
-    # none (alias for "use none")
-    sub.add_parser("none", help="Clear the active project (alias for 'use none')", **_F)
-
     # list
-    sub.add_parser("list", help="Show all projects",
-                   usage="raptor project list", **_F)
+    sub.add_parser("list", help="Show all projects")
 
     # status
-    p_status = sub.add_parser("status", help="Show project summary",
-                              usage="raptor project status [<name>]", **_F)
+    p_status = sub.add_parser("status", help="Show project summary")
     p_status.add_argument("name", nargs="?", help="Project name")
 
-    # coverage
-    p_cov = sub.add_parser("coverage", help="Show coverage summary",
-                           usage="raptor project coverage [<name>] [--detailed]", **_F)
-    p_cov.add_argument("name", nargs="?", help="Project name")
-    p_cov.add_argument("--detailed", action="store_true", help="Per-file breakdown")
-
-    # findings
-    p_findings = sub.add_parser("findings", help="Show merged findings across all runs",
-                                usage="raptor project findings [<name>] [--detailed]", **_F)
-    p_findings.add_argument("name", nargs="?", help="Project name")
-    p_findings.add_argument("--detailed", action="store_true", help="Per-finding detail (reasoning, proof, PoC)")
-
     # delete
-    p_delete = sub.add_parser("delete", help="Delete a project",
-                              usage="raptor project delete <name> [--purge] [--yes]", **_F)
-    p_delete.add_argument("name", help="Project name")
+    p_delete = sub.add_parser("delete", help="Delete a project")
+    p_delete.add_argument("name")
     p_delete.add_argument("--purge", action="store_true", help="Also delete output directory")
     p_delete.add_argument("--yes", action="store_true", help="Skip confirmation")
 
     # rename
-    p_rename = sub.add_parser("rename", help="Rename a project",
-                              usage="raptor project rename <old> <new>", **_F)
-    p_rename.add_argument("old", help="Current name")
-    p_rename.add_argument("new", help="New name")
+    p_rename = sub.add_parser("rename", help="Rename a project")
+    p_rename.add_argument("old")
+    p_rename.add_argument("new")
 
     # notes
-    p_notes = sub.add_parser("notes", help="View or update project notes",
-                             usage="raptor project notes <name> [<text>] [--file <path>] [--edit]", **_F)
-    p_notes.add_argument("name", help="Project name")
+    p_notes = sub.add_parser("notes", help="View or update project notes")
+    p_notes.add_argument("name")
     p_notes.add_argument("text", nargs="?", help="New notes text")
     if os.isatty(0):
         p_notes.add_argument("--edit", action="store_true", help="Open in $EDITOR")
-    p_notes.add_argument("--file", default=None, metavar="<path>", help="Read notes from file")
+    p_notes.add_argument("--file", default=None, help="Read notes from file")
 
     # description
-    p_desc = sub.add_parser("description", help="View or update project description",
-                            usage="raptor project description <name> [<text>]", **_F)
-    p_desc.add_argument("name", help="Project name")
+    p_desc = sub.add_parser("description", help="View or update project description")
+    p_desc.add_argument("name")
     p_desc.add_argument("text", nargs="?", help="New description text")
 
     # add
-    p_add = sub.add_parser("add", help="Add existing runs to a project",
-                           usage="raptor project add <name> <directory> [--target <path>] [--output-dir <dir>]", **_F)
-    p_add.add_argument("name", help="Project name")
-    p_add.add_argument("directory", help="Directory containing runs")
-    p_add.add_argument("--target", metavar="<path>", help="Target path (creates project if needed)")
-    p_add.add_argument("--output-dir", default=None, metavar="<dir>", help="Custom output directory")
+    p_add = sub.add_parser("add", help="Add existing runs to a project")
+    p_add.add_argument("name")
+    p_add.add_argument("directory")
+    p_add.add_argument("--target", help="Target path (creates project if needed)")
+    p_add.add_argument("--output-dir", default=None, help="Custom output directory")
 
     # remove
-    p_remove = sub.add_parser("remove", help="Move a run out of the project",
-                              usage="raptor project remove <name> <run> --to <path>", **_F)
-    p_remove.add_argument("name", help="Project name")
-    p_remove.add_argument("run", help="Run directory name")
-    p_remove.add_argument("--to", required=True, metavar="<path>", help="Destination path")
+    p_remove = sub.add_parser("remove", help="Move a run out of the project")
+    p_remove.add_argument("name")
+    p_remove.add_argument("run")
+    p_remove.add_argument("--to", required=True, help="Destination path")
 
     # report
-    p_report = sub.add_parser("report", help="Generate merged report across all runs",
-                              usage="raptor project report [<name>]", **_F)
-    p_report.add_argument("name", nargs="?", help="Project name")
+    p_report = sub.add_parser("report", help="Generate merged report across all runs")
+    p_report.add_argument("name", nargs="?")
 
     # diff
-    p_diff = sub.add_parser("diff", help="Compare findings between two runs",
-                            usage="raptor project diff <name> <run1> <run2>", **_F)
-    p_diff.add_argument("name", help="Project name")
-    p_diff.add_argument("run1", help="Baseline run")
-    p_diff.add_argument("run2", help="Comparison run")
+    p_diff = sub.add_parser("diff", help="Compare findings between two runs")
+    p_diff.add_argument("name")
+    p_diff.add_argument("run1")
+    p_diff.add_argument("run2")
 
     # merge
-    p_merge = sub.add_parser("merge", help="Merge runs per command type (destructive)",
-                             usage="raptor project merge [<name>] [--type <type>] [--yes]", **_F)
-    p_merge.add_argument("name", nargs="?", help="Project name")
-    p_merge.add_argument("--type", default="all", metavar="<type>", help="scan|validate|agentic|all")
+    p_merge = sub.add_parser("merge", help="Merge runs per command type (destructive)")
+    p_merge.add_argument("name", nargs="?")
+    p_merge.add_argument("--type", default="all", help="Command type to merge (scan|validate|agentic|all)")
     p_merge.add_argument("--yes", action="store_true", help="Skip confirmation")
 
     # clean
-    p_clean = sub.add_parser("clean", help="Delete old runs, keep latest n",
-                             usage="raptor project clean [<name>] [--keep <n>] [--dry-run] [--yes]", **_F)
-    p_clean.add_argument("name", nargs="?", help="Project name")
-    p_clean.add_argument("--keep", type=int, default=1, metavar="<n>", help="Runs to keep per type (default: 1)")
+    p_clean = sub.add_parser("clean", help="Delete old runs, keep latest n")
+    p_clean.add_argument("name", nargs="?")
+    p_clean.add_argument("--keep", type=int, default=1, help="Runs to keep per type (default: 1)")
     p_clean.add_argument("--dry-run", action="store_true", help="Show what would be deleted")
     p_clean.add_argument("--yes", action="store_true", help="Skip confirmation")
 
     # export
-    p_export = sub.add_parser("export", help="Export project as zip",
-                              usage="raptor project export <name> <path> [--force]", **_F)
-    p_export.add_argument("name", help="Project name")
+    p_export = sub.add_parser("export", help="Export project as zip")
+    p_export.add_argument("name")
     p_export.add_argument("path", help="Destination zip path")
-    p_export.add_argument("--force", action="store_true", help="Overwrite existing file")
 
     # import
-    p_import = sub.add_parser("import", help="Import project from zip",
-                              usage="raptor project import <path> [--force] [--sha256 <hash>]", **_F)
+    p_import = sub.add_parser("import", help="Import project from zip")
     p_import.add_argument("path", help="Zip file path")
     p_import.add_argument("--force", action="store_true", help="Overwrite existing project")
-    p_import.add_argument("--sha256", default=None, metavar="<hash>", help="Expected SHA-256 hash to verify")
+    p_import.add_argument("--sha256", default=None, help="Expected SHA-256 hash to verify")
 
     # help
-    p_help = sub.add_parser("help", help="Show help",
-                            usage="raptor project help [<subcommand>]", **_F)
-    p_help.add_argument("topic", nargs="?", help="Subcommand name")
+    p_help = sub.add_parser("help", help="Show help")
+    p_help.add_argument("topic", nargs="?", help="Subcommand to get help for")
 
     args = parser.parse_args()
 
     if not args.subcommand:
         parser.print_help()
         return
-
-    # Alias: "project none" → "project use none"
-    if args.subcommand == "none":
-        args.subcommand = "use"
-        args.name = "none"
 
     mgr = ProjectManager()
 
@@ -220,28 +171,6 @@ def main():
                 return
             _print_status(p)
 
-        elif args.subcommand == "coverage":
-            name = args.name or _get_active_project()
-            if not name:
-                print("No project specified.")
-                return
-            p = mgr.load(name)
-            if not p:
-                print(f"Project '{name}' not found.")
-                return
-            _print_coverage(p, detailed=args.detailed)
-
-        elif args.subcommand == "findings":
-            name = args.name or _get_active_project()
-            if not name:
-                print("No project specified.")
-                return
-            p = mgr.load(name)
-            if not p:
-                print(f"Project '{name}' not found.")
-                return
-            _print_findings(p, detailed=args.detailed)
-
         elif args.subcommand == "use":
             if args.name is None:
                 # No argument — show current active project
@@ -278,13 +207,7 @@ def main():
                 return
             if args.purge and not args.yes and p.output_path.exists():
                 size = sum(f.stat().st_size for f in p.output_path.rglob("*") if f.is_file())
-                if size >= 1024 * 1024:
-                    size_str = f"{size / 1024 / 1024:.1f}MB"
-                elif size >= 1024:
-                    size_str = f"{size / 1024:.1f}KB"
-                else:
-                    size_str = f"{size}B"
-                print(f"This will delete {args.name} and its output ({size_str})")
+                print(f"This will delete {args.name} and its output ({size / 1024 / 1024:.1f}MB)")
                 if input("Proceed? [y/N] ").lower() != "y":
                     print("Cancelled.")
                     return
@@ -409,11 +332,9 @@ def main():
             if not p:
                 print(f"Project '{args.name}' not found.")
                 return
-            p.sweep_stale_runs(keep_latest=True)
             project_json = mgr.projects_dir / f"{args.name}.json"
             result = export_project(p.output_path, Path(args.path),
-                                    project_json_path=project_json,
-                                    force=args.force)
+                                    project_json_path=project_json)
             print(f"Exported to {result['path']}")
             print(f"  sha256: {result['sha256']}")
 
@@ -454,7 +375,7 @@ def main():
                 return
             _do_merge(p, args.type, args.yes)
 
-    except (ValueError, FileExistsError) as e:
+    except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
     except KeyboardInterrupt:
@@ -465,58 +386,27 @@ def main():
 def _get_active_project():
     """Get the active project name from .active symlink or env var."""
     mgr = ProjectManager()
-    return mgr.get_active()
 
+    # 1. .active symlink (current truth — reflects mid-session `use` changes)
+    active = mgr.get_active()
+    if active:
+        return active
 
-def _count_sarif_results(run_dir):
-    """Count total results across all SARIF files in a run directory."""
-    from core.json import load_json
-    count = 0
-    for sarif_path in run_dir.glob("*.sarif"):
-        data = load_json(sarif_path)
-        if not data or not isinstance(data, dict):
-            continue
-        for run in data.get("runs", []):
-            count += len(run.get("results", []))
-    return count
+    # 2. RAPTOR_PROJECT_NAME env var (launch-time, from bin/raptor -p)
+    name = os.environ.get("RAPTOR_PROJECT_NAME", "")
+    if name:
+        return name
 
+    # 3. RAPTOR_PROJECT_DIR reverse-lookup (legacy/manual use)
+    project_dir = os.environ.get("RAPTOR_PROJECT_DIR", "")
+    if project_dir:
+        resolved = str(Path(project_dir).resolve())
+        for p in mgr.list_projects():
+            if str(Path(p.output_dir).resolve()) == resolved:
+                return p.name
+        return Path(project_dir).name
 
-def _get_output_summary(run_dir, meta):
-    """Get findings/results string for a run, using cached summary when available.
-
-    On first access for a completed run, computes the summary and writes it
-    back to .raptor-run.json so subsequent calls are instant.
-    """
-    from core.json import save_json
-    from core.run.metadata import RUN_METADATA_FILE
-
-    # Use cached summary if present
-    cached = (meta or {}).get("output_summary")
-    if cached:
-        return cached
-
-    # Compute from findings or SARIF
-    from .findings_utils import load_findings_from_dir, count_vulns
-    findings = load_findings_from_dir(run_dir)
-    if findings:
-        vuln_count = count_vulns(findings)
-        if vuln_count != len(findings):
-            result = f"{vuln_count} findings"
-        else:
-            result = f"{len(findings)} findings"
-    else:
-        sarif_count = _count_sarif_results(run_dir)
-        result = f"{sarif_count} results" if sarif_count else ""
-
-    # Cache in metadata for completed/failed runs (won't change)
-    status = (meta or {}).get("status", "")
-    if result and status in ("completed", "failed"):
-        meta_path = run_dir / RUN_METADATA_FILE
-        if meta_path.exists() and meta:
-            meta["output_summary"] = result
-            save_json(meta_path, meta)
-
-    return result
+    return None
 
 
 def _print_status(project):
@@ -533,7 +423,7 @@ def _print_status(project):
     if project.notes:
         print(f"Notes: {project.notes}")
 
-    runs = project.get_run_dirs(sweep=False)
+    runs = project.get_run_dirs()
     if runs:
         print(f"\nRuns: {len(runs)}")
         name_col = max(max(len(d.name) for d in runs) + 2, 20)
@@ -541,7 +431,8 @@ def _print_status(project):
             meta = load_run_metadata(d)
             cmd = meta.get("command", "?") if meta else "?"
             status = meta.get("status", "?") if meta else "?"
-            findings_str = _get_output_summary(d, meta)
+            findings = load_findings_from_dir(d)
+            findings_str = f"{len(findings)} findings" if findings else ""
             if status == "completed":
                 status_str = _green(status)
             elif status == "failed":
@@ -550,7 +441,7 @@ def _print_status(project):
                 status_str = _yellow(status)
             else:
                 status_str = status
-            print(f"  {d.name:<{name_col}s}  {cmd:12s}  {findings_str:24s}  {status_str}")
+            print(f"  {d.name:<{name_col}s}  {cmd:12s}  {findings_str:15s}  {status_str}")
         # Disk usage — skip symlinks to avoid following outside the project
         total_size = 0
         for d in runs:
@@ -560,135 +451,9 @@ def _print_status(project):
                         total_size += f.stat().st_size
                     except OSError:
                         pass
-        if total_size >= 1024 * 1024:
-            print(f"\nDisk usage: {total_size / 1024 / 1024:.1f}MB")
-        elif total_size >= 1024:
-            print(f"\nDisk usage: {total_size / 1024:.1f}KB")
-        else:
-            print(f"\nDisk usage: {total_size}B")
-
+        print(f"\nDisk usage: {total_size / 1024 / 1024:.1f}MB")
     else:
         print("\nNo runs.")
-
-
-def _print_coverage(project, detailed=False):
-    """Print project coverage summary or detailed view."""
-    from core.coverage.summary import (
-        compute_project_summary, format_summary, format_detailed,
-    )
-    summary = compute_project_summary(project)
-    if not summary:
-        print("No coverage data (no checklist or coverage records found).")
-        return
-    if detailed:
-        print(format_detailed(summary))
-    else:
-        print(format_summary(summary))
-
-
-def _print_findings(project, detailed=False):
-    """Print merged findings across all runs, grouped by vuln."""
-    from .merge import merge_findings
-    from .findings_utils import count_vulns, group_findings
-    from core.reporting.findings import build_findings_summary, findings_summary_line
-    from core.reporting.formatting import get_display_status, title_case_type, truncate_path
-
-    run_dirs = project.get_run_dirs(sweep=False)
-    merged = merge_findings(run_dirs)
-
-    if not merged:
-        print("No findings.")
-        return
-
-    vuln_count = count_vulns(merged)
-    counts = build_findings_summary(merged)
-    groups = group_findings(merged)
-
-    # Summary line
-    print(findings_summary_line(counts, vuln_count).replace("**", ""))
-    print()
-
-    # Build grouped rows: one row per vuln
-    grouped_rows = []  # (file_loc, type, status, cvss, findings_list)
-    for key, findings in groups.items():
-        # Use the first finding for display, pick best status/cvss across group
-        rep = findings[0]  # representative finding
-        fpath = rep.get("file", "")
-        fname = fpath.rsplit("/", 1)[-1] if "/" in fpath else fpath
-
-        # Lines: show all lines in the group
-        lines_in_group = sorted(set(f.get("line", 0) for f in findings))
-        if len(lines_in_group) == 1:
-            loc = f"{fname}:{lines_in_group[0]}"
-        else:
-            loc = f"{fname}:{','.join(str(l) for l in lines_in_group)}"
-        loc = truncate_path(loc) if loc else "—"
-
-        vtype = title_case_type(rep.get("vuln_type", ""))
-        status = get_display_status(rep)
-
-        cvss = rep.get("cvss_score_estimate")
-        cvss_str = str(cvss) if cvss is not None else "—"
-
-        grouped_rows.append((loc, vtype, status, cvss_str, findings, fpath))
-
-    grouped_rows.sort(key=lambda r: (r[5], min(f.get("line", 0) for f in r[4])))
-
-    # Compact table
-    headers = ("File", "Type", "Status", "CVSS")
-    widths = [len(h) for h in headers]
-    for row in grouped_rows:
-        for i, cell in enumerate(row[:4]):
-            widths[i] = max(widths[i], len(cell))
-
-    fmt = f"  {{:<{widths[0]}s}}  {{:<{widths[1]}s}}  {{:<{widths[2]}s}}  {{:>{widths[3]}s}}"
-    print(fmt.format(*headers))
-    print(f"  {'-' * widths[0]}  {'-' * widths[1]}  {'-' * widths[2]}  {'-' * widths[3]}")
-    for row in grouped_rows:
-        print(fmt.format(*row[:4]))
-
-    if not detailed:
-        return
-
-    # Detailed view: per-vuln reasoning, proof, PoC
-    print()
-    pad = len(str(len(grouped_rows)))
-    indent = " " * (pad + 5)  # aligns with text after "  [XX] "
-    for i, (loc, vtype, status, cvss_str, findings, _) in enumerate(grouped_rows, 1):
-        print(f"  [{i:0{pad}d}] {loc} — {vtype} ({status})")
-
-        # Use representative finding for details
-        rep = findings[0]
-
-        # Reasoning (stage summaries or analysis)
-        reasoning = (
-            rep.get("stage_d_summary")
-            or rep.get("stage_b_summary")
-            or rep.get("candidate_reasoning")
-            or rep.get("reasoning")
-        )
-        if reasoning and isinstance(reasoning, str):
-            rlines = reasoning.strip().split("\n")[:2]
-            for ln in rlines:
-                print(f"{indent}{ln.strip()}")
-
-        # Proof
-        proof_source = rep.get("proof_source")
-        proof_sink = rep.get("proof_sink")
-        if proof_source or proof_sink:
-            parts = []
-            if proof_source:
-                parts.append(f"source: {proof_source}")
-            if proof_sink:
-                parts.append(f"sink: {proof_sink}")
-            print(f"{indent}Proof: {', '.join(parts)}")
-
-        print()
-
-
-def _finding_label(f):
-    """Location-based label for a finding."""
-    return f"{f.get('file', '?')}:{f.get('function', '?')}:{f.get('line', '?')}"
 
 
 def _print_diff(result):
@@ -696,15 +461,18 @@ def _print_diff(result):
     if result["new"]:
         print(f"New ({len(result['new'])}):")
         for f in result["new"]:
-            print(_green(f"  + {_finding_label(f)}"))
+            fid = get_finding_id(f) or "?"
+            print(_green(f"  + {fid}"))
     if result["removed"]:
         print(f"Removed ({len(result['removed'])}):")
         for f in result["removed"]:
-            print(_red(f"  - {_finding_label(f)}"))
+            fid = get_finding_id(f) or "?"
+            print(_red(f"  - {fid}"))
     if result["changed"]:
         print(f"Changed ({len(result['changed'])}):")
         for c in result["changed"]:
-            print(_yellow(f"  ~ {c['label']} ({c.get('status_before', '?')} → {c.get('status_after', '?')})"))
+            # Changed entries have their own "id" field from the diff wrapper
+            print(_yellow(f"  ~ {c['id']} ({c.get('status_before', '?')} → {c.get('status_after', '?')})"))
     print(f"Unchanged: {result['unchanged']}")
 
 
@@ -810,9 +578,5 @@ def _do_merge(project, merge_type, yes):
             for msg in failed_deletes:
                 print(f"  {cmd_type}: warning — failed to delete {msg}")
 
-        vuln_count = stats.get("unique_vulns", stats["unique_findings"])
-        if vuln_count != stats["unique_findings"]:
-            findings_label = f"{vuln_count} findings"
-        else:
-            findings_label = f"{stats['unique_findings']} findings"
-        print(f"  {cmd_type}: merged {stats['runs_merged']} runs ({findings_label})")
+        print(f"  {cmd_type}: merged {stats['runs_merged']} runs "
+              f"({stats['unique_findings']} findings)")

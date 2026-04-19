@@ -77,6 +77,26 @@ class TestGetActiveProject(unittest.TestCase):
                     result = _get_active_project()
             self.assertIsNone(result)
 
+    def test_symlink_takes_priority_over_env(self):
+        with TemporaryDirectory() as d:
+            projects_dir = Path(d)
+            (projects_dir / "myapp.json").write_text('{"name":"myapp"}')
+            (projects_dir / ".active").symlink_to("myapp.json")
+
+            with patch("core.project.project.PROJECTS_DIR", projects_dir):
+                with patch.dict(os.environ, {"RAPTOR_PROJECT_NAME": "oldproject"}):
+                    result = _get_active_project()
+            # Symlink wins over env var
+            self.assertEqual(result, "myapp")
+
+    def test_env_var_used_when_no_symlink(self):
+        with TemporaryDirectory() as d:
+            projects_dir = Path(d)
+            # No .active symlink
+            with patch("core.project.project.PROJECTS_DIR", projects_dir):
+                with patch.dict(os.environ, {"RAPTOR_PROJECT_NAME": "fromenv"}):
+                    result = _get_active_project()
+            self.assertEqual(result, "fromenv")
 
 
 if __name__ == "__main__":

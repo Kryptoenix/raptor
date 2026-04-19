@@ -19,8 +19,7 @@ from pathlib import Path
 from typing import Dict, Optional, Any, Tuple
 
 # Add parent directories to path for core imports
-# packages/llm_analysis/llm/client.py -> repo root
-sys.path.insert(0, str(Path(__file__).parents[3]))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.logging import get_logger
 from .config import LLMConfig, ModelConfig
@@ -58,8 +57,9 @@ def _sanitize_log_message(msg: str) -> str:
     msg = re.sub(r'pk-[a-zA-Z0-9-_]{20,}', '[REDACTED-API-KEY]', msg)
     # Redact Google API keys (AIza*)
     msg = re.sub(r'AIza[a-zA-Z0-9-_]{30,}', '[REDACTED-API-KEY]', msg)
-    # Redact Bearer tokens (Mistral and others in auth headers/error messages)
+    # Redact Bearer tokens (Mistral and others in error messages)
     msg = re.sub(r'Bearer [a-zA-Z0-9-_]{20,}', 'Bearer [REDACTED]', msg)
+    # TODO: Add patterns for other providers as needed (new key formats, etc.)
     return msg
 
 
@@ -213,11 +213,10 @@ class LLMClient:
 
         # Initialize cache
         if self.config.enable_caching:
-            try:
-                self.config.cache_dir.mkdir(parents=True, exist_ok=True)
-            except OSError:
-                self.config.enable_caching = False
-                logger.warning(f"Cannot create cache dir {self.config.cache_dir} — caching disabled")
+            self.config.cache_dir.mkdir(parents=True, exist_ok=True)
+
+        # Track whether we've already warned about local model limitations
+        self._warned_local_model = False
 
         logger.info("LLM Client initialized")
         if self.config.primary_model:
@@ -379,8 +378,9 @@ class LLMClient:
                 logger.debug(f"Using model: {model.provider}/{model.model_name}")
             else:
                 logger.warning(f"Falling back to: {model.provider}/{model.model_name}")
-            if model.provider.lower() == "ollama":
+            if model.provider.lower() == "ollama" and not self._warned_local_model:
                 logger.warning(f"Local model — exploit PoCs may be unreliable")
+                self._warned_local_model = True
 
             logger.debug(f"Trying model: {model.provider}/{model.model_name}")
 
@@ -521,8 +521,9 @@ class LLMClient:
                 logger.debug(f"Using model: {model.provider}/{model.model_name} (structured)")
             else:
                 logger.warning(f"Falling back to: {model.provider}/{model.model_name} (structured)")
-            if model.provider.lower() == "ollama":
+            if model.provider.lower() == "ollama" and not self._warned_local_model:
                 logger.warning(f"Local model — exploit PoCs may be unreliable")
+                self._warned_local_model = True
 
             for attempt in range(self.config.max_retries):
                 try:

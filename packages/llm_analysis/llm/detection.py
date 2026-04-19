@@ -19,8 +19,7 @@ from typing import List, Optional
 import requests
 
 # Add parent directories to path for core imports
-# packages/llm_analysis/llm/detection.py -> repo root
-sys.path.insert(0, str(Path(__file__).parents[3]))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.config import RaptorConfig
 from core.logging import get_logger
@@ -210,9 +209,10 @@ def _try_auto_migrate(old_config: Path, new_config: Path) -> bool:
         if not models:
             return False
 
-        # Write new config with restrictive permissions atomically
+        # Write new config
         from core.json import save_json
-        save_json(new_config, {"models": models}, mode=0o600)
+        save_json(new_config, {"models": models})
+        os.chmod(new_config, 0o600)
 
         # Check if any keys need attention
         needs_keys = any(

@@ -18,8 +18,7 @@ import sys
 from pathlib import Path
 
 # Add paths for cross-package imports
-# packages/web/crawler.py -> repo root
-sys.path.insert(0, str(Path(__file__).parents[2]))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from core.logging import get_logger
 from packages.web.client import WebClient

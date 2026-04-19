@@ -1,0 +1,4 @@
+{"timestamp": "2026-04-16 10:49:30,577", "level": "DEBUG", "logger": "raptor", "module": "logging", "function": "debug", "line": 118, "message": "RAPTOR logging initialized - audit trail: /home/claude/raptor_fix2/out/logs/raptor_1776336570.jsonl"}
+{"timestamp": "2026-04-16 10:49:30,580", "level": "INFO", "logger": "raptor", "module": "logging", "function": "info", "line": 124, "message": "Detected architecture: x86_64"}
+{"timestamp": "2026-04-16 10:49:30,583", "level": "WARNING", "logger": "raptor", "module": "logging", "function": "warning", "line": 130, "message": "QEMU binary not found: qemu-x86_64 (install: sudo apt install qemu-user-static)"}
+{"timestamp": "2026-04-16 10:49:30,584", "level": "WARNING", "logger": "raptor", "module": "logging", "function": "warning", "line": 130, "message": "gdb not found \u2014 skipping binary analysis"}

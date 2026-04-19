@@ -61,94 +61,27 @@ class Project:
     def output_path(self) -> Path:
         return Path(self.output_dir)
 
-    def _list_run_dirs(self) -> List[Path]:
-        """List run directories (unsorted). Shared by get_run_dirs and sweep."""
-        if not self.output_path.exists():
-            return []
-        return [d for d in self.output_path.iterdir()
-                if d.is_dir() and not d.name.startswith((".", "_"))]
-
-    def get_run_dirs(self, sweep=False) -> List[Path]:
+    def get_run_dirs(self) -> List[Path]:
         """List run directories sorted newest-first.
 
         Uses the timestamp embedded in the directory name when available
         (deterministic), falls back to mtime for non-standard names.
-        When sweep=True, marks stale 'running' dirs as failed.
-        Inside Claude Code (CLAUDECODE=1), keeps the newest running dir
-        (may be active). Outside Claude Code, sweeps all.
-        Default is sweep=False to avoid damaging active runs from read-only
-        commands (status, findings, coverage).
+        Excludes directories starting with '.' or '_' (internal/metadata dirs).
         """
+        if not self.output_path.exists():
+            return []
         from core.run.metadata import parse_timestamp_from_name
 
         def _sort_key(d: Path) -> str:
             ts = parse_timestamp_from_name(d.name)
             if ts:
                 return ts
+            # Fallback: convert mtime to ISO for consistent comparison
             return datetime.fromtimestamp(d.stat().st_mtime, tz=timezone.utc).isoformat()
 
-        dirs = self._list_run_dirs()
-        if sweep:
-            in_session = bool(os.environ.get("CLAUDECODE"))
-            self._sweep_stale(dirs, keep_latest=in_session)
+        dirs = [d for d in self.output_path.iterdir()
+                if d.is_dir() and not d.name.startswith((".", "_"))]
         return sorted(dirs, key=_sort_key, reverse=True)
-
-    def sweep_stale_runs(self, keep_latest=False) -> int:
-        """Mark stale 'running' run dirs as failed.
-
-        Args:
-            keep_latest: if True, skip the most recent 'running' dir
-                         (it may be actively running this session).
-                         False at startup (nothing is running).
-
-        Returns count of dirs marked failed.
-        """
-        return self._sweep_stale(self._list_run_dirs(), keep_latest)
-
-    def _sweep_stale(self, dirs: list, keep_latest=False) -> int:
-        """Mark 'running' dirs as failed if their session is dead.
-
-        Checks session_pid in metadata — if the PID is still alive, the
-        session that started the run is still running and will clean up
-        its own runs. Only sweeps runs whose session has died.
-
-        Args:
-            keep_latest: if True, skip the most recent 'running' dir even
-                         if its session is dead (legacy fallback for runs
-                         without session_pid).
-        """
-        from core.run.metadata import RUN_METADATA_FILE, fail_run, _pid_alive
-        from core.json import load_json
-
-        # Find all running dirs with their timestamps and PIDs
-        running = []
-        for d in dirs:
-            meta_file = d / RUN_METADATA_FILE
-            if not meta_file.exists():
-                continue
-            meta = load_json(meta_file)
-            if meta and meta.get("status") == "running":
-                running.append((meta.get("timestamp", ""), d, meta.get("session_pid")))
-
-        if not running:
-            return 0
-
-        swept = 0
-        # Sort newest first for keep_latest
-        running.sort(reverse=True)
-
-        for i, (ts, d, pid) in enumerate(running):
-            # If session_pid is recorded and alive, skip — session will clean up
-            if pid is not None and _pid_alive(pid):
-                continue
-            # No PID (legacy run) — use keep_latest heuristic
-            if pid is None and keep_latest and i == 0:
-                continue
-            fail_run(d, "stale — session ended without completion",
-                     record_timing=False)
-            swept += 1
-
-        return swept
 
     def get_run_dirs_by_type(self) -> Dict[str, List[Path]]:
         """Group run directories by command type.
@@ -159,7 +92,7 @@ class Project:
         from core.run import infer_command_type, generate_run_metadata
         from core.run.metadata import RUN_METADATA_FILE
         groups: Dict[str, List[Path]] = {}
-        for d in self.get_run_dirs(sweep=False):
+        for d in self.get_run_dirs():
             if not (d / RUN_METADATA_FILE).exists():
                 generate_run_metadata(d)
             cmd_type = infer_command_type(d)
@@ -394,23 +327,18 @@ class ProjectManager:
         logger.info(f"Moved '{run_name}' to {to_path}")
 
     def set_active(self, name: str = None) -> None:
-        """Set the active project symlink. Pass None to clear.
+        """Set the active project symlink and update CLAUDE_ENV_FILE.
 
-        The symlink is the single source of truth for project state.
-        Uses atomic create-temp-then-rename to avoid TOCTOU races.
+        Pass None to clear.
         """
-        import os
         active_link = self.projects_dir / ".active"
-        auto_marker = self.projects_dir / ".auto"
-        auto_marker.unlink(missing_ok=True)
+        if active_link.is_symlink() or active_link.exists():
+            active_link.unlink()
         if name is not None:
-            # Atomic swap: create temp symlink then rename over the active link
-            tmp_link = self.projects_dir / ".active.tmp"
-            tmp_link.unlink(missing_ok=True)
-            tmp_link.symlink_to(f"{name}.json")
-            os.rename(str(tmp_link), str(active_link))
-        else:
-            active_link.unlink(missing_ok=True)
+            active_link.symlink_to(f"{name}.json")
+
+        # Update CLAUDE_ENV_FILE so env vars stay in sync mid-session
+        self._update_env_file(name)
 
     def get_active(self) -> Optional[str]:
         """Get the active project name from the .active symlink."""
@@ -424,6 +352,39 @@ class ProjectManager:
                 # Dangling — clean up
                 active_link.unlink(missing_ok=True)
         return None
+
+    def _update_env_file(self, name: str = None) -> None:
+        """Update CLAUDE_ENV_FILE with project env vars.
+
+        Rewrites the RAPTOR_PROJECT_* lines. Preserves other content (e.g. PATH).
+        If name is None, removes the project env vars.
+        """
+        env_file = os.environ.get("CLAUDE_ENV_FILE")
+        if not env_file:
+            return
+
+        env_path = Path(env_file)
+        try:
+            existing = env_path.read_text() if env_path.exists() else ""
+        except OSError:
+            return
+
+        # Remove old RAPTOR_PROJECT_* lines
+        lines = [l for l in existing.splitlines()
+                 if not l.startswith("export RAPTOR_PROJECT_")]
+
+        # Add new ones if a project is active
+        if name:
+            project = self.load(name)
+            if project:
+                lines.append(f'export RAPTOR_PROJECT_DIR="{project.output_dir}"')
+                lines.append(f'export RAPTOR_PROJECT_NAME="{project.name}"')
+                lines.append(f'export RAPTOR_PROJECT_TARGET="{project.target}"')
+
+        try:
+            env_path.write_text("\n".join(lines) + "\n" if lines else "")
+        except OSError:
+            pass
 
     def find_project_for_target(self, target: str) -> Optional[Project]:
         """Auto-detect: find a project whose target matches the given path."""
