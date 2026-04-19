@@ -81,7 +81,7 @@
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/gadievron/raptor.git
+git clone https://github.com/Kryptoenix/raptor.git
 cd raptor
 ```
 
