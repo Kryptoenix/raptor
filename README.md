@@ -74,6 +74,7 @@
 - **Finding details** — expandable cards with vulnerable code (red-highlighted), surrounding context, exploit PoC, patch, reasoning, attack scenario, CVSS, CWE
 - **Export** — download reports as JSON or PDF
 
+![](Dashboard.png)
 ---
 
 ## Installation
